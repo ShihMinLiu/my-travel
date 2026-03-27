@@ -3,115 +3,66 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>旅遊規劃 - 終極穩定版</title>
+    <title>旅遊規劃 - 診斷測試版</title>
     <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
         .column { min-width: 320px; max-width: 320px; height: calc(100vh - 180px); }
         .no-scrollbar::-webkit-scrollbar { display: none; }
-        /* 確保照片完整顯示 */
-        .img-container { width: 100%; height: 200px; background: #000; display: flex; align-items: center; justify-content: center; overflow: hidden; }
-        .img-full { max-width: 100%; max-height: 100%; object-fit: contain; }
     </style>
 </head>
-<body class="bg-slate-50 text-slate-900 font-sans">
+<body class="bg-slate-100 text-slate-900">
     <div id="app" class="h-screen flex flex-col">
-        <header class="bg-indigo-900 text-white p-4 shadow-xl flex-none">
-            <div class="flex justify-between items-center mb-3">
-                <div class="flex flex-col">
-                    <h1 class="text-xl font-black italic">SWISS TRAVEL</h1>
-                    <span class="text-[10px] opacity-70">同步狀態: {{ lastSyncTime }}</span>
-                </div>
-                <div class="flex items-center gap-2">
-                    <div v-if="loading" class="text-[10px] bg-white/20 px-2 py-1 rounded-full animate-pulse">同步中</div>
-                    <button @click="fetchFromCloud" class="p-2 hover:bg-white/10 rounded-full"><i class="fa-solid fa-sync"></i></button>
-                    <button @click="createNewTrip" class="bg-emerald-600 text-white font-bold px-3 py-1 rounded-lg text-sm">+ 行程</button>
+        <header class="bg-red-800 text-white p-4 shadow-xl">
+            <div class="flex justify-between items-center mb-2">
+                <h1 class="font-bold tracking-tighter italic text-xl">DEBUG MODE</h1>
+                <div class="flex gap-2">
+                    <button @click="fetchFromCloud" class="p-2 bg-red-700 rounded-full" title="手動同步">
+                        <i class="fa-solid fa-sync" :class="{'fa-spin': loading}"></i>
+                    </button>
+                    <button @click="createNewTrip" class="bg-white text-red-800 px-3 py-1 rounded font-bold">+ 行程</button>
                 </div>
             </div>
-            <div class="flex gap-2 overflow-x-auto no-scrollbar">
-                <button v-for="(trip, index) in trips" :key="index" @click="activeTripIndex = index"
-                    :class="['px-5 py-1.5 rounded-full text-sm whitespace-nowrap transition-all', activeTripIndex === index ? 'bg-white text-indigo-900 font-bold' : 'bg-white/20 text-indigo-100']">
-                    {{ trip.name }}
-                </button>
+            <div class="text-[10px] opacity-80">
+                API 網址: <span class="bg-black/20 px-1 rounded">{{ apiUrl.substring(0, 40) }}...</span>
             </div>
         </header>
 
-        <main class="flex-1 overflow-x-auto p-6 flex gap-6">
-            <div v-for="(day, dIdx) in currentTrip.days" :key="dIdx" class="column flex flex-col bg-slate-200/50 rounded-3xl border border-slate-200">
-                <div class="p-4 flex justify-between items-center">
-                    <input v-model="day.date" @blur="saveToCloud" class="bg-transparent font-black text-slate-700 w-full outline-none">
-                    <button @click="removeDay(dIdx)" class="text-slate-400 hover:text-red-500"><i class="fa-solid fa-trash-can text-sm"></i></button>
+        <main class="flex-1 overflow-x-auto p-4 flex gap-4">
+            <div v-for="(day, dIdx) in currentTrip.days" :key="dIdx" class="column flex flex-col bg-white/80 border rounded-3xl">
+                <div class="p-4 border-b flex justify-between">
+                    <input v-model="day.date" class="font-bold outline-none bg-transparent">
+                    <button @click="removeDay(dIdx)" class="text-slate-300 hover:text-red-500"><i class="fa-solid fa-trash"></i></button>
                 </div>
-
-                <div class="flex-1 overflow-y-auto px-4 pb-4 space-y-4">
-                    <div v-for="(card, cIdx) in day.cards" :key="cIdx" class="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden group">
-                        <div v-if="card.image" class="img-container">
-                            <img :src="card.image" class="img-full" @error="card.image = ''">
-                        </div>
-                        <div class="p-4">
-                            <div class="flex flex-wrap gap-1 mb-2">
-                                <span v-for="tag in card.tags" :key="tag" class="text-[9px] px-2 py-0.5 rounded bg-indigo-50 text-indigo-600 font-bold uppercase">{{ tag }}</span>
-                            </div>
-                            <div class="flex justify-between items-start mb-2">
-                                <h3 class="font-bold text-slate-800 flex-1">{{ card.title }}</h3>
-                                <div class="flex gap-2 opacity-0 group-hover:opacity-100 transition">
-                                    <button @click="editCard(dIdx, cIdx)" class="text-slate-400 hover:text-indigo-600"><i class="fa-solid fa-pen"></i></button>
-                                    <button @click="removeCard(dIdx, cIdx)" class="text-slate-400 hover:text-red-500"><i class="fa-solid fa-trash"></i></button>
-                                </div>
-                            </div>
-                            <div v-if="card.checklist && card.checklist.length" class="mb-3 space-y-1 bg-slate-50 p-2 rounded-lg border border-slate-100 text-[10px]">
-                                <div v-for="item in card.checklist" class="flex items-center gap-2">
-                                    <input type="checkbox" v-model="item.done" @change="saveToCloud" class="rounded h-3 w-3">
-                                    <span :class="{'line-through text-slate-300': item.done}" class="text-slate-600 truncate">{{ item.text }}</span>
-                                </div>
-                            </div>
-                            <div class="flex gap-3">
-                                <a v-if="card.mapLink" :href="card.mapLink" target="_blank" class="text-red-500"><i class="fa-solid fa-location-dot"></i></a>
-                                <a v-if="card.url" :href="card.url" target="_blank" class="text-indigo-500"><i class="fa-solid fa-link"></i></a>
+                <div class="flex-1 overflow-y-auto p-4 space-y-4">
+                    <div v-for="(card, cIdx) in day.cards" :key="cIdx" class="bg-white p-4 rounded-xl shadow-sm border border-slate-100 group">
+                        <img v-if="card.image" :src="card.image" class="w-full h-32 object-contain bg-black rounded-lg mb-2">
+                        <div class="flex justify-between font-bold text-slate-700">
+                            <span>{{ card.title }}</span>
+                            <div class="flex gap-2 opacity-0 group-hover:opacity-100">
+                                <button @click="editCard(dIdx, cIdx)" class="text-blue-500"><i class="fa-solid fa-pen"></i></button>
+                                <button @click="removeCard(dIdx, cIdx)" class="text-red-500"><i class="fa-solid fa-trash"></i></button>
                             </div>
                         </div>
                     </div>
-                    <button @click="openCardModal(dIdx)" class="w-full py-4 border-2 border-dashed border-slate-300 text-slate-300 rounded-2xl hover:bg-white font-bold transition-all">+ 新增項目</button>
+                    <button @click="openCardModal(dIdx)" class="w-full py-4 border-2 border-dashed border-slate-200 text-slate-300 rounded-xl font-bold">+ 新增</button>
                 </div>
             </div>
-            <button @click="addDay" class="column flex items-center justify-center bg-white/50 border-2 border-dashed border-slate-200 rounded-3xl text-slate-300 font-bold">新增欄位</button>
+            <button @click="addDay" class="px-10 bg-white/50 border-2 border-dashed border-slate-200 rounded-3xl font-bold">新增欄位</button>
         </main>
 
-        <div v-if="showModal" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-sm">
-            <div class="bg-white w-full max-w-lg rounded-3xl shadow-2xl overflow-hidden">
-                <div class="p-6 overflow-y-auto max-h-[80vh]">
-                    <h2 class="text-xl font-black text-slate-800 mb-6 border-l-4 border-indigo-600 pl-3">編輯細節</h2>
-                    <div class="space-y-6">
-                        <input v-model="form.title" class="w-full border-b-2 border-slate-100 p-2 font-bold focus:border-indigo-500 outline-none" placeholder="標題 *">
-
-                        <div class="bg-indigo-50 p-4 rounded-2xl">
-                            <div class="flex justify-between items-center mb-3">
-                                <label class="text-[10px] font-black text-indigo-400 uppercase tracking-widest">檢查清單</label>
-                                <button @click="form.checklist.push({text:'', done:false})" class="text-[10px] font-bold text-white bg-indigo-500 px-3 py-1 rounded-full">+ 新增</button>
-                            </div>
-                            <div v-for="(item, i) in form.checklist" :key="i" class="flex gap-2 mb-2">
-                                <input type="checkbox" v-model="item.done" class="rounded h-4 w-4">
-                                <input v-model="item.text" class="flex-1 bg-white border rounded-lg p-2 text-xs outline-none" placeholder="做什麼...">
-                                <button @click="form.checklist.splice(i, 1)" class="text-red-300"><i class="fa-solid fa-minus-circle"></i></button>
-                            </div>
-                        </div>
-
-                        <div class="bg-slate-50 p-4 rounded-2xl border-2 border-dashed border-slate-200">
-                            <label class="block text-[10px] font-black text-slate-400 mb-2 uppercase tracking-widest text-center">圖片網址 (最穩定做法)</label>
-                            <input v-model="form.image" class="w-full bg-white border rounded-xl p-3 text-xs outline-none focus:ring-2 ring-indigo-200" placeholder="貼上圖片 URL (如 https://...jpg)">
-                            <p class="text-[9px] text-slate-400 mt-2 italic">* 提示：請將照片傳到 Imgur 或 Google 相簿，點擊「複製圖片位址」後貼上。</p>
-                        </div>
-
-                        <div class="grid grid-cols-2 gap-3 text-xs">
-                            <input v-model="form.mapLink" class="bg-slate-50 p-3 rounded-xl outline-none" placeholder="Google Maps">
-                            <input v-model="form.url" class="bg-slate-50 p-3 rounded-xl outline-none" placeholder="相關連結">
-                        </div>
+        <div v-if="showModal" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70">
+            <div class="bg-white w-full max-w-md rounded-2xl p-6">
+                <h2 class="font-bold text-lg mb-4 text-red-800">編輯測試</h2>
+                <div class="space-y-4">
+                    <input v-model="form.title" class="w-full border-b p-2 outline-none focus:border-red-800" placeholder="標題 *">
+                    <div class="bg-red-50 p-3 rounded-lg border border-red-100">
+                        <label class="text-[10px] font-bold text-red-400">圖片網址</label>
+                        <input v-model="form.image" class="w-full text-xs p-1 outline-none mt-1" placeholder="https://...">
                     </div>
-                </div>
-                <div class="p-6 bg-slate-50 flex gap-4">
-                    <button @click="showModal = false" class="flex-1 py-4 text-slate-500 font-bold hover:bg-slate-200 rounded-2xl">取消</button>
-                    <button @click="saveCard" class="flex-1 py-4 bg-indigo-600 text-white font-bold rounded-2xl shadow-xl hover:bg-indigo-700 transition">確認儲存</button>
+                    <button @click="saveCard" class="w-full py-3 bg-red-800 text-white font-bold rounded-xl shadow-lg">確認並儲存</button>
+                    <button @click="showModal = false" class="w-full py-2 text-slate-400 text-sm">取消</button>
                 </div>
             </div>
         </div>
@@ -128,80 +79,74 @@
                 const loading = ref(false);
                 const showModal = ref(false);
                 const isEditing = ref(false);
-                const lastSyncTime = ref('--:--');
-                const defaultTags = ref(['交通', '美食', '景點', '購物']);
-                const form = ref({ title: '', desc: '', image: '', mapLink: '', url: '', checklist: [], tags: [] });
+                const form = ref({ title: '', image: '', checklist: [], tags: [] });
                 const editingPos = ref({ day: 0, card: 0 });
 
                 const currentTrip = computed(() => trips.value[activeTripIndex.value] || trips.value[0]);
 
                 const fetchFromCloud = async () => {
-                    if (loading.value || showModal.value) return;
                     loading.value = true;
                     try {
                         const res = await fetch(CLOUD_API_URL);
                         const data = await res.json();
-                        if (Array.isArray(data)) trips.value = data;
-                        lastSyncTime.value = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-                    } catch (e) { console.error(e); } finally { loading.value = false; }
+                        if (Array.isArray(data)) {
+                            trips.value = data;
+                            console.log("資料抓取成功");
+                        }
+                    } catch (e) { alert("抓取失敗: " + e); }
+                    finally { loading.value = false; }
                 };
 
                 const saveToCloud = async () => {
                     loading.value = true;
                     try {
+                        const jsonStr = JSON.stringify(trips.value);
+                        // 注意：這裡使用 POST。請確保 GAS 的部署權限是「所有人」。
                         await fetch(CLOUD_API_URL, { 
                             method: "POST", 
                             mode: "no-cors", 
-                            body: JSON.stringify(trips.value) 
+                            body: jsonStr 
                         });
-                        setTimeout(() => { loading.value = false; lastSyncTime.value = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); }, 1500);
-                    } catch (e) { loading.value = false; }
+                        console.log("已送出存檔請求，請確認試算表是否有變化");
+                    } catch (e) { alert("儲存失敗: " + e); }
+                    finally { loading.value = false; }
                 };
 
                 const openCardModal = (dayIdx) => {
                     isEditing.value = false;
                     editingPos.value.day = dayIdx;
-                    form.value = { title: '', desc: '', image: '', mapLink: '', url: '', checklist: [], tags: [] };
+                    form.value = { title: '', image: '', checklist: [], tags: [] };
                     showModal.value = true;
                 };
 
                 const editCard = (dayIdx, cardIdx) => {
                     isEditing.value = true;
                     editingPos.value = { day: dayIdx, card: cardIdx };
-                    const rawData = JSON.parse(JSON.stringify(currentTrip.value.days[dayIdx].cards[cardIdx]));
-                    if (!rawData.checklist) rawData.checklist = [];
-                    form.value = rawData;
+                    form.value = JSON.parse(JSON.stringify(currentTrip.value.days[dayIdx].cards[cardIdx]));
                     showModal.value = true;
                 };
 
                 const saveCard = () => {
-                    if (!form.value.title) return alert('請填標題');
+                    if (!form.value.title) return;
                     if (isEditing.value) currentTrip.value.days[editingPos.value.day].cards[editingPos.value.card] = { ...form.value };
                     else currentTrip.value.days[editingPos.value.day].cards.push({ ...form.value });
                     showModal.value = false;
-                    saveToCloud();
+                    saveToCloud(); // 儲存後不自動 fetch，方便觀察資料是否消失
                 };
 
-                const removeCard = (d, c) => { if(confirm('刪除？')) { currentTrip.value.days[d].cards.splice(c, 1); saveToCloud(); }};
+                const removeCard = (d, c) => { currentTrip.value.days[d].cards.splice(c, 1); saveToCloud(); };
                 const createNewTrip = () => { const n = prompt('名稱？'); if(n){ trips.value.push({name:n, days:[{date:'Day 1', cards:[]}]}); saveToCloud(); }};
                 const addDay = () => { currentTrip.value.days.push({date:'新欄位', cards:[]}); saveToCloud(); };
                 const removeDay = (idx) => { if(confirm('刪除？')) { currentTrip.value.days.splice(idx,1); saveToCloud(); }};
 
-                const toggleTag = (tag) => {
-                    if (!form.value.tags) form.value.tags = [];
-                    const idx = form.value.tags.indexOf(tag);
-                    if (idx > -1) form.value.tags.splice(idx, 1);
-                    else form.value.tags.push(tag);
-                };
-
                 onMounted(() => {
                     fetchFromCloud();
-                    setInterval(fetchFromCloud, 40000);
+                    // 暫時關閉 setInterval 自動同步，改為完全手動控制
                 });
 
                 return {
-                    trips, activeTripIndex, currentTrip, loading, showModal, isEditing, form, lastSyncTime, defaultTags,
-                    fetchFromCloud, saveToCloud, openCardModal, editCard, saveCard, removeCard, createNewTrip, addDay, removeDay, toggleTag
+                    apiUrl: CLOUD_API_URL, trips, activeTripIndex, currentTrip, loading, showModal, isEditing, form,
+                    fetchFromCloud, saveToCloud, openCardModal, editCard, saveCard, removeCard, createNewTrip, addDay, removeDay
                 };
             }
         }).mount('#app');
