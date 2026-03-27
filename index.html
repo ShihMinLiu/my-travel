@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>旅遊協作板 - 自動同步版</title>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        .column { min-width: 300px; max-width: 300px; height: calc(100vh - 180px); }
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .card:active { transform: scale(0.97); }
+    </style>
+</head>
+<body class="bg-slate-100 text-slate-900 font-sans">
+    <div id="app" class="h-screen flex flex-col">
+        <header class="bg-indigo-800 text-white p-4 shadow-xl flex-none">
+            <div class="flex justify-between items-center mb-3">
+                <div class="flex flex-col">
+                    <h1 class="text-xl font-black tracking-tighter flex items-center gap-2">
+                        <i class="fa-solid fa-earth-americas"></i> CO-TRAVEL
+                    </h1>
+                    <span class="text-[10px] opacity-70">最後更新: {{ lastSyncTime }}</span>
+                </div>
+                <div class="flex items-center gap-2">
+                    <div v-if="loading" class="text-xs bg-white/20 px-2 py-1 rounded-full animate-pulse">同步中...</div>
+                    <button @click="fetchFromCloud" class="p-2 hover:bg-white/20 rounded-full transition"><i class="fa-solid fa-arrows-rotate"></i></button>
+                    <button @click="createNewTrip" class="bg-emerald-500 text-white font-bold px-3 py-1 rounded-lg text-sm shadow-md">+ 行程</button>
+                </div>
+            </div>
+            
+            <div class="flex gap-2 overflow-x-auto no-scrollbar">
+                <button v-for="(trip, index) in trips" :key="index" @click="activeTripIndex = index"
+                    :class="['px-5 py-1.5 rounded-full text-sm whitespace-nowrap transition-all', 
+                             activeTripIndex === index ? 'bg-white text-indigo-800 font-bold' : 'bg-indigo-700/50 text-indigo-100']">
+                    {{ trip.name }}
+                </button>
+            </div>
+        </header>
+
+        <main class="flex-1 overflow-x-auto overflow-y-hidden p-6 flex gap-6">
+            <div v-for="(day, dIdx) in currentTrip.days" :key="dIdx" class="column flex flex-col bg-slate-200/50 rounded-2xl border border-slate-300">
+                <div class="p-4 flex justify-between items-center">
+                    <input v-model="day.date" @change="saveToCloud" class="bg-transparent font-black text-slate-700 w-full focus:outline-none">
+                    <div class="flex gap-1">
+                        <button v-if="clipboard" @click="pasteCard(dIdx)" class="text-indigo-600 p-1"><i class="fa-solid fa-paste"></i></button>
+                        <button @click="removeDay(dIdx)" class="text-slate-400 hover:text-red-500 p-1"><i class="fa-solid fa-trash-can"></i></button>
+                    </div>
+                </div>
+
+                <div class="flex-1 overflow-y-auto px-3 pb-4 space-y-4">
+                    <div v-for="(card, cIdx) in day.cards" :key="cIdx" class="bg-white p-4 rounded-xl shadow-sm relative group border-b-4 border-indigo-100">
+                        <div class="flex justify-between items-start mb-2">
+                            <h3 class="font-bold text-slate-800 flex-1 leading-tight">{{ card.title }}</h3>
+                            <div class="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                <button @click="copyCard(card)" class="text-slate-400"><i class="fa-solid fa-copy"></i></button>
+                                <button @click="editCard(dIdx, cIdx)" class="text-slate-400"><i class="fa-solid fa-pen-to-square"></i></button>
+                                <button @click="removeCard(dIdx, cIdx)" class="text-slate-400"><i class="fa-solid fa-circle-xmark"></i></button>
+                            </div>
+                        </div>
+
+                        <img v-if="card.image" :src="card.image" class="w-full h-32 object-cover rounded-lg mb-2">
+                        <p v-if="card.desc" class="text-xs text-slate-600 mb-2 whitespace-pre-wrap">{{ card.desc }}</p>
+                        
+                        <div v-if="card.checklist.length" class="space-y-1 mb-2">
+                            <div v-for="(item, iIdx) in card.checklist" :key="iIdx" class="flex items-center gap-2 text-[11px]">
+                                <input type="checkbox" v-model="item.done" @change="saveToCloud" class="rounded text-indigo-600">
+                                <span :class="{'line-through text-slate-400': item.done}">{{ item.text }}</span>
+                            </div>
+                        </div>
+
+                        <div class="flex flex-wrap gap-2">
+                            <a v-if="card.mapLink" :href="card.mapLink" target="_blank" class="text-[9px] font-bold bg-red-50 text-red-600 px-2 py-0.5 rounded border border-red-100 uppercase">Maps</a>
+                            <a v-if="card.url" :href="card.url" target="_blank" class="text-[9px] font-bold bg-blue-50 text-blue-600 px-2 py-0.5 rounded border border-blue-100 uppercase">Link</a>
+                        </div>
+                    </div>
+                    <button @click="openCardModal(dIdx)" class="w-full py-3 border-2 border-dashed border-slate-300 text-slate-400 rounded-xl hover:bg-white transition-all">+ 新增項目</button>
+                </div>
+            </div>
+            <button @click="addDay" class="column flex flex-col items-center justify-center bg-white/30 border-2 border-dashed border-slate-300 rounded-2xl text-slate-400 hover:bg-white transition-all">
+                <i class="fa-solid fa-plus-circle text-2xl mb-1"></i>
+                <span class="font-bold text-xs">新增日期</span>
+            </button>
+        </main>
+
+        <div v-if="showModal" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+            <div class="bg-white w-full max-w-md rounded-2xl shadow-2xl p-6">
+                <h2 class="text-lg font-black text-slate-800 mb-4">{{ isEditing ? '編輯區塊' : '建立新區塊' }}</h2>
+                <div class="space-y-3 max-h-[60vh] overflow-y-auto pr-1">
+                    <input v-model="form.title" class="w-full border rounded-lg p-2 text-sm" placeholder="標題 *">
+                    <textarea v-model="form.desc" class="w-full border rounded-lg p-2 text-sm h-20" placeholder="描述"></textarea>
+                    <input v-model="form.image" class="w-full border rounded-lg p-2 text-sm" placeholder="圖片網址">
+                    <input v-model="form.mapLink" class="w-full border rounded-lg p-2 text-sm" placeholder="Google Maps 連結">
+                    <input v-model="form.url" class="w-full border rounded-lg p-2 text-sm" placeholder="參考網址">
+                    <div class="border-t pt-2">
+                        <div class="flex justify-between text-xs font-bold text-slate-400 mb-2"><span>檢查清單</span><button @click="form.checklist.push({text:'', done:false})">+ 新增</button></div>
+                        <div v-for="(item, i) in form.checklist" :key="i" class="flex gap-2 mb-2">
+                            <input v-model="item.text" class="flex-1 border rounded p-1 text-xs">
+                            <button @click="form.checklist.splice(i, 1)" class="text-red-400">×</button>
+                        </div>
+                    </div>
+                </div>
+                <div class="flex gap-3 mt-6">
+                    <button @click="showModal = false" class="flex-1 py-2 text-slate-500 font-bold">取消</button>
+                    <button @click="saveCard" class="flex-1 py-2 bg-indigo-600 text-white font-bold rounded-lg shadow-lg">儲存</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const { createApp, ref, computed, onMounted, onUnmounted } = Vue;
+        const CLOUD_API_URL = "https://script.google.com/macros/s/AKfycbz2pfKFYg66Z2TB8Wkdl7a1_im5A_A3iyIA3avst_OZVoNKoH1eJERnoKRFmu9XCWep/exec";
+
+        createApp({
+            setup() {
+                const trips = ref([{ name: '我的旅程', days: [{ date: 'Day 1', cards: [] }] }]);
+                const activeTripIndex = ref(0);
+                const loading = ref(false);
+                const showModal = ref(false);
+                const isEditing = ref(false);
+                const editingPos = ref({ day: 0, card: 0 });
+                const clipboard = ref(null);
+                const lastSyncTime = ref('--:--:--');
+                const form = ref({ title: '', desc: '', image: '', mapLink: '', url: '', checklist: [] });
+                let syncTimer = null;
+
+                const currentTrip = computed(() => trips.value[activeTripIndex.value] || trips.value[0]);
+
+                const fetchFromCloud = async () => {
+                    loading.value = true;
+                    try {
+                        const response = await fetch(CLOUD_API_URL);
+                        const data = await response.json();
+                        if (Array.isArray(data) && data.length > 0) {
+                            trips.value = data;
+                            lastSyncTime.value = new Date().toLocaleTimeString();
+                        }
+                    } catch (e) { console.error("抓取失敗:", e); }
+                    finally { loading.value = false; }
+                };
+
+                const saveToCloud = async () => {
+                    loading.value = true;
+                    try {
+                        await fetch(CLOUD_API_URL, {
+                            method: "POST",
+                            mode: "no-cors",
+                            body: JSON.stringify(trips.value)
+                        });
+                        setTimeout(() => { 
+                            loading.value = false; 
+                            lastSyncTime.value = new Date().toLocaleTimeString();
+                        }, 800);
+                    } catch (e) { loading.value = false; }
+                };
+
+                // 自動同步設定：每 30 秒執行一次 fetchFromCloud
+                const startAutoSync = () => {
+                    syncTimer = setInterval(() => {
+                        // 只有在沒在編輯(Modal關閉)時才自動更新，避免打斷使用者輸入
+                        if (!showModal.value && !loading.value) {
+                            fetchFromCloud();
+                        }
+                    }, 30000); 
+                };
+
+                const createNewTrip = () => {
+                    const name = prompt('行程名稱？', '新行程');
+                    if (name) { trips.value.push({ name, days: [{ date: 'Day 1', cards: [] }] }); activeTripIndex.value = trips.value.length - 1; saveToCloud(); }
+                };
+
+                const addDay = () => { currentTrip.value.days.push({ date: `Day ${currentTrip.value.days.length + 1}`, cards: [] }); saveToCloud(); };
+                const removeDay = (idx) => { if (confirm('確定刪除？')) { currentTrip.value.days.splice(idx, 1); saveToCloud(); } };
+                const openCardModal = (dayIdx) => { isEditing.value = false; editingPos.value.day = dayIdx; form.value = { title: '', desc: '', image: '', mapLink: '', url: '', checklist: [] }; showModal.value = true; };
+                const editCard = (dayIdx, cardIdx) => { isEditing.value = true; editingPos.value = { day: dayIdx, card: cardIdx }; form.value = JSON.parse(JSON.stringify(currentTrip.value.days[dayIdx].cards[cardIdx])); showModal.value = true; };
+                const saveCard = () => { if (!form.value.title) return; if (isEditing.value) currentTrip.value.days[editingPos.value.day].cards[editingPos.value.card] = { ...form.value }; else currentTrip.value.days[editingPos.value.day].cards.push({ ...form.value }); showModal.value = false; saveToCloud(); };
+                const removeCard = (dayIdx, cardIdx) => { currentTrip.value.days[dayIdx].cards.splice(cardIdx, 1); saveToCloud(); };
+                const copyCard = (card) => { clipboard.value = JSON.parse(JSON.stringify(card)); };
+                const pasteCard = (dayIdx) => { if (clipboard.value) { currentTrip.value.days[dayIdx].cards.push(JSON.parse(JSON.stringify(clipboard.value))); saveToCloud(); } };
+
+                onMounted(() => {
+                    fetchFromCloud();
+                    startAutoSync();
+                });
+
+                onUnmounted(() => {
+                    if (syncTimer) clearInterval(syncTimer);
+                });
+
+                return {
+                    trips, activeTripIndex, currentTrip, loading, showModal, isEditing, form, clipboard, lastSyncTime,
+                    fetchFromCloud, saveToCloud, createNewTrip, addDay, removeDay, openCardModal, editCard, saveCard, removeCard, copyCard, pasteCard
+                };
+            }
+        }).mount('#app');
+    </script>
+</body>
+</html>
