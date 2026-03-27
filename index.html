@@ -3,14 +3,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>旅遊協作板 - 自動壓縮圖片版</title>
+    <title>旅遊協作板 - 功能全開版</title>
     <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
         .column { min-width: 320px; max-width: 320px; height: calc(100vh - 180px); }
         .no-scrollbar::-webkit-scrollbar { display: none; }
-        .card-preview { max-height: 160px; overflow: hidden; }
+        .checklist-item:last-child { border-bottom: none; }
     </style>
 </head>
 <body class="bg-slate-50 text-slate-900 font-sans">
@@ -51,7 +51,7 @@
                         <img v-if="card.image && card.showImage" :src="card.image" class="w-full h-40 object-cover">
                         <div class="p-4">
                             <div class="flex flex-wrap gap-1 mb-2">
-                                <span v-for="tag in card.tags" :key="tag" class="text-[9px] px-2 py-0.5 rounded bg-indigo-100 text-indigo-600 font-bold">{{ tag }}</span>
+                                <span v-for="tag in card.tags" :key="tag" class="text-[9px] px-2 py-0.5 rounded bg-indigo-100 text-indigo-600 font-bold uppercase">{{ tag }}</span>
                             </div>
                             <div class="flex justify-between items-start mb-2">
                                 <h3 class="font-bold text-slate-800 flex-1">{{ card.title }}</h3>
@@ -61,13 +61,24 @@
                                 </div>
                             </div>
                             <p v-if="card.desc" class="text-xs text-slate-500 mb-3 line-clamp-2">{{ card.desc }}</p>
+
+                            <div v-if="card.checklist && card.checklist.length" class="mb-3 space-y-1 bg-slate-50 p-2 rounded-lg">
+                                <div v-for="(item, iIdx) in card.checklist" :key="iIdx" class="flex items-center gap-2 text-[10px]">
+                                    <input type="checkbox" v-model="item.done" @change="saveToCloud" class="rounded text-indigo-600 h-3 w-3">
+                                    <span :class="{'line-through text-slate-400': item.done}" class="text-slate-700 truncate">{{ item.text }}</span>
+                                </div>
+                            </div>
+
                             <div class="flex gap-3">
                                 <a v-if="card.mapLink" :href="card.mapLink" target="_blank" class="text-red-500"><i class="fa-solid fa-location-dot"></i></a>
                                 <a v-if="card.url" :href="card.url" target="_blank" class="text-indigo-500"><i class="fa-solid fa-link"></i></a>
+                                <span v-if="card.checklist && card.checklist.length" class="ml-auto text-[9px] font-bold text-slate-400">
+                                    {{ card.checklist.filter(i => i.done).length }}/{{ card.checklist.length }} 完成
+                                </span>
                             </div>
                         </div>
                     </div>
-                    <button @click="openCardModal(dIdx)" class="w-full py-4 border-2 border-dashed border-slate-200 text-slate-400 rounded-2xl hover:bg-slate-50 font-bold">+ 新增小區塊</button>
+                    <button @click="openCardModal(dIdx)" class="w-full py-4 border-2 border-dashed border-slate-200 text-slate-400 rounded-2xl hover:bg-slate-50 font-bold transition-all">+ 新增小區塊</button>
                 </div>
             </div>
             <button @click="addDay" class="column flex flex-col items-center justify-center bg-indigo-50/50 border-2 border-dashed border-indigo-200 rounded-3xl text-indigo-300 hover:bg-indigo-50 transition-all">
@@ -77,39 +88,64 @@
         </main>
 
         <div v-if="showModal" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-sm">
-            <div class="bg-white w-full max-w-lg rounded-3xl shadow-2xl overflow-hidden">
+            <div class="bg-white w-full max-w-lg rounded-3xl shadow-2xl overflow-hidden animate-in zoom-in duration-200">
                 <div class="p-6 overflow-y-auto max-h-[85vh]">
-                    <h2 class="text-xl font-black text-slate-800 mb-4 flex items-center gap-2">行程編輯</h2>
+                    <h2 class="text-xl font-black text-slate-800 mb-4 flex items-center gap-2">編輯行程</h2>
                     <div class="space-y-4">
                         <div>
-                            <label class="block text-xs font-black text-slate-400 mb-2 uppercase">標籤</label>
+                            <label class="block text-xs font-black text-slate-400 mb-2 uppercase tracking-widest">選擇標籤</label>
                             <div class="flex flex-wrap gap-2 mb-2">
                                 <button v-for="t in defaultTags" :key="t" @click="toggleTag(t)"
                                     :class="['px-3 py-1 rounded-lg text-xs font-bold transition-all', form.tags.includes(t) ? 'bg-indigo-600 text-white shadow-md' : 'bg-slate-100 text-slate-500']">{{ t }}</button>
                                 <button @click="addNewTag" class="px-3 py-1 rounded-lg text-xs font-bold bg-slate-800 text-white">+ 自訂</button>
                             </div>
                         </div>
-                        <input v-model="form.title" class="w-full border-b-2 border-slate-100 p-2 font-bold focus:border-indigo-500 outline-none" placeholder="標題名稱 *">
+                        
+                        <input v-model="form.title" class="w-full border-b-2 border-slate-100 p-2 font-bold focus:border-indigo-500 outline-none text-lg" placeholder="標題名稱 *">
+                        
                         <div class="bg-slate-50 p-4 rounded-2xl border-2 border-dashed border-slate-200">
-                            <label class="block text-xs font-black text-slate-400 mb-2">圖片上傳 (將自動壓縮)</label>
+                            <label class="block text-xs font-black text-slate-400 mb-2">圖片 (將自動壓縮)</label>
                             <input type="file" @change="handleFileUpload" accept="image/*" class="text-xs text-slate-500 mb-2">
                             <div v-if="form.image" class="mt-2 relative">
-                                <img :src="form.image" class="w-full h-32 object-cover rounded-lg">
+                                <img :src="form.image" class="w-full h-32 object-cover rounded-xl">
                                 <label class="absolute top-2 left-2 bg-black/50 text-white px-2 py-1 rounded text-[10px] flex items-center gap-1">
-                                    <input type="checkbox" v-model="form.showImage"> 顯示預覽圖
+                                    <input type="checkbox" v-model="form.showImage"> 設為預覽圖
                                 </label>
                             </div>
                         </div>
-                        <textarea v-model="form.desc" class="w-full bg-slate-50 rounded-xl p-3 text-sm h-20 outline-none" placeholder="輸入描述..."></textarea>
-                        <div class="grid grid-cols-2 gap-2 text-xs">
-                            <input v-model="form.mapLink" class="bg-slate-50 p-2 rounded-lg" placeholder="Google Maps 連結">
-                            <input v-model="form.url" class="bg-slate-50 p-2 rounded-lg" placeholder="參考網址">
+
+                        <textarea v-model="form.desc" class="w-full bg-slate-50 rounded-2xl p-4 text-sm h-24 outline-none border-2 border-transparent focus:border-indigo-100" placeholder="輸入詳細描述..."></textarea>
+                        
+                        <div class="bg-indigo-50/30 p-4 rounded-2xl border border-indigo-100">
+                            <div class="flex justify-between items-center mb-3">
+                                <label class="text-xs font-black text-indigo-400 uppercase tracking-widest">檢查清單</label>
+                                <button @click="form.checklist.push({text:'', done:false})" class="text-[10px] font-bold text-indigo-600 bg-white px-2 py-1 rounded-lg shadow-sm hover:bg-indigo-600 hover:text-white transition">+ 新增項目</button>
+                            </div>
+                            <div class="space-y-2">
+                                <div v-for="(item, i) in form.checklist" :key="i" class="flex gap-2">
+                                    <input type="checkbox" v-model="item.done" class="mt-2 rounded h-4 w-4 text-indigo-600">
+                                    <input v-model="item.text" class="flex-1 bg-white border border-slate-200 rounded-lg p-2 text-xs focus:ring-2 ring-indigo-200 outline-none" placeholder="項目內容">
+                                    <button @click="form.checklist.splice(i, 1)" class="text-red-300 hover:text-red-500 p-1"><i class="fa-solid fa-circle-minus"></i></button>
+                                </div>
+                                <p v-if="!form.checklist.length" class="text-[10px] text-slate-400 italic text-center py-2">目前沒有檢查項目</p>
+                            </div>
+                        </div>
+
+                        <div class="grid grid-cols-2 gap-3 text-xs">
+                            <div class="flex flex-col gap-1">
+                                <span class="text-[10px] text-slate-400 font-bold ml-1 uppercase">Google Maps</span>
+                                <input v-model="form.mapLink" class="bg-slate-50 p-3 rounded-xl outline-none" placeholder="地圖連結">
+                            </div>
+                            <div class="flex flex-col gap-1">
+                                <span class="text-[10px] text-slate-400 font-bold ml-1 uppercase">參考連結</span>
+                                <input v-model="form.url" class="bg-slate-50 p-3 rounded-xl outline-none" placeholder="網址連結">
+                            </div>
                         </div>
                     </div>
                 </div>
-                <div class="p-4 bg-slate-50 flex gap-3">
-                    <button @click="showModal = false" class="flex-1 py-3 text-slate-500 font-bold">取消</button>
-                    <button @click="saveCard" class="flex-1 py-3 bg-indigo-600 text-white font-bold rounded-2xl">確認儲存</button>
+                <div class="p-6 bg-slate-50 flex gap-4">
+                    <button @click="showModal = false" class="flex-1 py-3 text-slate-500 font-bold hover:bg-slate-200 rounded-2xl transition">取消</button>
+                    <button @click="saveCard" class="flex-1 py-3 bg-indigo-600 text-white font-bold rounded-2xl shadow-xl hover:bg-indigo-700 transition">儲存行程</button>
                 </div>
             </div>
         </div>
@@ -121,7 +157,7 @@
 
         createApp({
             setup() {
-                const trips = ref([{ name: '瑞士自由行', days: [{ date: '2026/02/14', cards: [] }] }]);
+                const trips = ref([{ name: '瑞士行', days: [{ date: '2026/02/14', cards: [] }] }]);
                 const activeTripIndex = ref(0);
                 const loading = ref(false);
                 const loadingMsg = ref('同步中...');
@@ -134,7 +170,6 @@
 
                 const currentTrip = computed(() => trips.value[activeTripIndex.value] || trips.value[0]);
 
-                // 自動壓縮核心邏輯
                 const compressImage = (file) => {
                     return new Promise((resolve) => {
                         const reader = new FileReader();
@@ -144,20 +179,12 @@
                             img.src = event.target.result;
                             img.onload = () => {
                                 const canvas = document.createElement('canvas');
-                                let width = img.width;
-                                let height = img.height;
-                                // 限制最大寬度為 1000px
-                                if (width > 1000) {
-                                    height = Math.round((height * 1000) / width);
-                                    width = 1000;
-                                }
-                                canvas.width = width;
-                                canvas.height = height;
+                                let width = img.width, height = img.height;
+                                if (width > 800) { height = Math.round((height * 800) / width); width = 800; }
+                                canvas.width = width; canvas.height = height;
                                 const ctx = canvas.getContext('2d');
                                 ctx.drawImage(img, 0, 0, width, height);
-                                // 壓縮品質設為 0.7 左右，通常能壓到 300KB 以下
-                                const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
-                                resolve(dataUrl);
+                                resolve(canvas.toDataURL('image/jpeg', 0.6));
                             };
                         };
                     });
@@ -167,7 +194,7 @@
                     const file = e.target.files[0];
                     if (!file) return;
                     loading.value = true;
-                    loadingMsg.value = '正在壓縮圖片...';
+                    loadingMsg.value = '壓縮中...';
                     form.value.image = await compressImage(file);
                     form.value.showImage = true;
                     loading.value = false;
@@ -186,6 +213,7 @@
                 };
 
                 const fetchFromCloud = async () => {
+                    if (loading.value) return;
                     loading.value = true;
                     try {
                         const res = await fetch(CLOUD_API_URL);
@@ -216,12 +244,16 @@
                 const editCard = (dayIdx, cardIdx) => {
                     isEditing.value = true;
                     editingPos.value = { day: dayIdx, card: cardIdx };
-                    form.value = JSON.parse(JSON.stringify(currentTrip.value.days[dayIdx].cards[cardIdx]));
+                    // 確保 checklist 是陣列，避免舊資料格式報錯
+                    const rawData = JSON.parse(JSON.stringify(currentTrip.value.days[dayIdx].cards[cardIdx]));
+                    if (!rawData.checklist) rawData.checklist = [];
+                    if (!rawData.tags) rawData.tags = [];
+                    form.value = rawData;
                     showModal.value = true;
                 };
 
                 const saveCard = () => {
-                    if (!form.value.title) return;
+                    if (!form.value.title) return alert('請輸入標題');
                     if (isEditing.value) currentTrip.value.days[editingPos.value.day].cards[editingPos.value.card] = { ...form.value };
                     else currentTrip.value.days[editingPos.value.day].cards.push({ ...form.value });
                     showModal.value = false;
@@ -230,7 +262,7 @@
 
                 const removeCard = (d, c) => { if(confirm('刪除？')) { currentTrip.value.days[d].cards.splice(c, 1); saveToCloud(); }};
                 const createNewTrip = () => { const n = prompt('行程名稱？'); if(n){ trips.value.push({name:n, days:[{date:'備註', cards:[]}]}); saveToCloud(); }};
-                const addDay = () => { currentTrip.value.days.push({date:'新欄位', cards:[]}); saveToCloud(); };
+                const addDay = () => { currentTrip.value.days.push({date:'新日期', cards:[]}); saveToCloud(); };
                 const removeDay = (idx) => { if(confirm('刪除整欄？')) { currentTrip.value.days.splice(idx,1); saveToCloud(); }};
 
                 onMounted(() => {
