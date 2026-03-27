@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>我的旅遊行程規劃 V1.8.0</title>
+    <title>我的旅遊行程規劃 V1.9.0</title>
     <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
@@ -20,6 +20,11 @@
 <body class="bg-slate-50 text-slate-900 font-sans">
     <div id="app" class="h-screen flex flex-col">
         
+        <div v-if="viewingImage" class="fixed inset-0 z-[100] flex items-center justify-center bg-black/90 p-4 animate-in fade-in duration-200" @click="viewingImage = null">
+            <button class="absolute top-4 right-4 text-white hover:text-red-500 text-3xl transition"><i class="fa-solid fa-xmark"></i></button>
+            <img :src="viewingImage" class="max-w-full max-h-full object-contain rounded-lg shadow-2xl" @click.stop>
+        </div>
+
         <div v-if="!isLoggedIn" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900 px-4">
             <div class="bg-white w-full max-w-sm rounded-3xl shadow-2xl p-8 text-center animate-in fade-in zoom-in duration-300">
                 <div class="w-16 h-16 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center mx-auto mb-4">
@@ -85,14 +90,24 @@
                              draggable="true" @dragstart.stop="handleDragStart('card', dIdx, cIdx, $event)" @dragend.stop="handleDragEnd($event)"
                              @dragover.prevent @dragenter.prevent @drop.stop="handleDrop('card', dIdx, cIdx)">
                             
-                            <div v-if="card.images && card.images.length > 0" class="img-preview relative flex items-center justify-center">
+                            <div v-if="card.images && card.images.length > 0" 
+                                 class="img-preview relative flex items-center justify-center cursor-pointer group/img clickable-area"
+                                 @click.stop="viewImage(getDirectImageUrl(card.images[card.coverIndex || 0]))">
                                 <img :src="getDirectImageUrl(card.images[card.coverIndex || 0])" class="max-w-full max-h-full object-contain pointer-events-none" @error="handleImageError">
+                                <div class="absolute inset-0 bg-black/30 opacity-0 group-hover/img:opacity-100 flex items-center justify-center transition">
+                                    <i class="fa-solid fa-magnifying-glass-plus text-white text-3xl drop-shadow-lg"></i>
+                                </div>
                                 <span v-if="card.images.length > 1" class="absolute bottom-2 right-2 bg-black/70 text-white text-[9px] px-2 py-1 rounded-full tracking-wider font-bold">
                                     <i class="fa-solid fa-images mr-1"></i>{{ card.images.length }}
                                 </span>
                             </div>
-                            <div v-else-if="card.image" class="img-preview flex items-center justify-center">
+                            <div v-else-if="card.image && card.showImage" 
+                                 class="img-preview relative flex items-center justify-center cursor-pointer group/img clickable-area"
+                                 @click.stop="viewImage(getDirectImageUrl(card.image))">
                                 <img :src="getDirectImageUrl(card.image)" class="max-w-full max-h-full object-contain pointer-events-none" @error="handleImageError">
+                                <div class="absolute inset-0 bg-black/30 opacity-0 group-hover/img:opacity-100 flex items-center justify-center transition">
+                                    <i class="fa-solid fa-magnifying-glass-plus text-white text-3xl drop-shadow-lg"></i>
+                                </div>
                             </div>
                             
                             <div class="p-4">
@@ -260,7 +275,7 @@
 
         createApp({
             setup() {
-                const appVersion = ref('V1.8.0');
+                const appVersion = ref('V1.9.0');
                 const isLoggedIn = ref(false);
                 const loginPassword = ref('');
                 
@@ -273,7 +288,10 @@
                 const isEditing = ref(false);
                 const lastSyncTime = ref('--:--');
                 
-                // 標籤顏色字典 (自動對應顏色)
+                // 圖片放大檢視的狀態
+                const viewingImage = ref(null);
+                const viewImage = (url) => { viewingImage.value = url; };
+
                 const tagColorMap = {
                     '機票': 'bg-sky-100 text-sky-700 border-sky-200',
                     '住宿': 'bg-indigo-100 text-indigo-700 border-indigo-200',
@@ -285,25 +303,21 @@
                 const defaultTags = ref(Object.keys(tagColorMap));
                 
                 const form = ref({ title: '', desc: '', images: [], coverIndex: 0, mapLink: '', mapName: '', url: '', urlName: '', checklist: [], tags: [] });
-                const tempImageUrl = ref(''); // 暫存手動輸入的圖片網址
+                const tempImageUrl = ref(''); 
                 
                 const editingPos = ref({ day: 0, card: 0 });
                 const dragInfo = ref({ type: null, dIdx: null, cIdx: null });
                 const expandedCards = ref({});
-                const clipboardCard = ref(null); // 剪貼簿
+                const clipboardCard = ref(null); 
 
                 const currentTrip = computed(() => trips.value[activeTripIndex.value] || trips.value[0]);
 
-                // --- 標籤色彩處理 ---
                 const getTagColor = (tag) => {
                     return tagColorMap[tag] || 'bg-slate-200 text-slate-700 border-slate-300';
                 };
 
-                // --- 複製與貼上 ---
                 const copyCard = (cardData) => {
-                    // 深拷貝一份資料到剪貼簿
                     clipboardCard.value = JSON.parse(JSON.stringify(cardData));
-                    // 使用原生 alert 或是你可以做一個精美的小 Toast
                     alert(`已複製「${cardData.title}」！您可以切換到其他行程貼上。`);
                 };
 
@@ -312,11 +326,11 @@
                         const newCard = JSON.parse(JSON.stringify(clipboardCard.value));
                         currentTrip.value.days[dayIdx].cards.push(newCard);
                         saveToCloud();
-                        // 貼上後保留剪貼簿，方便連續貼上多天
+                        // 貼上後立即清空剪貼簿
+                        clipboardCard.value = null; 
                     }
                 };
 
-                // --- 登入邏輯 ---
                 const handleLogin = async () => {
                     if (!loginPassword.value) return alert('請輸入密碼');
                     loading.value = true;
@@ -336,7 +350,6 @@
                     return text.replace(/</g, "<").replace(/>/g, ">").replace(urlRegex, (url) => `<a href="${url}" target="_blank" class="text-blue-500 font-bold underline" onclick="event.stopPropagation()">${url}</a>`).replace(/\n/g, '<br/>');
                 };
 
-                // --- 拖曳事件 ---
                 const handleDragStart = (type, dIdx, cIdx, event) => {
                     dragInfo.value = { type, dIdx, cIdx };
                     event.dataTransfer.effectAllowed = 'move';
@@ -362,7 +375,6 @@
                     saveToCloud();
                 };
 
-                // --- 圖片上傳與多圖管理 ---
                 const uploadToImgbb = async (e) => {
                     const file = e.target.files[0];
                     if (!file) return;
@@ -390,7 +402,6 @@
 
                 const removeImage = (idx) => {
                     form.value.images.splice(idx, 1);
-                    // 如果刪掉的是目前的封面，或是後面的圖片往前遞補，確保 coverIndex 不會越界
                     if (form.value.coverIndex >= form.value.images.length) {
                         form.value.coverIndex = Math.max(0, form.value.images.length - 1);
                     }
@@ -404,7 +415,6 @@
                 };
                 const handleImageError = (e) => { e.target.style.display = 'none'; };
 
-                // --- 雲端資料抓取 ---
                 const fetchFromCloud = async () => {
                     if (loading.value || showModal.value || !isLoggedIn.value) return;
                     loading.value = true;
@@ -445,7 +455,6 @@
                     editingPos.value = { day: dayIdx, card: cardIdx };
                     const rawData = JSON.parse(JSON.stringify(currentTrip.value.days[dayIdx].cards[cardIdx]));
                     
-                    // 向下相容處理：舊版單圖轉換為新版多圖陣列
                     if (rawData.image && (!rawData.images || rawData.images.length === 0)) {
                         rawData.images = [rawData.image];
                     }
@@ -483,7 +492,6 @@
                     const t = prompt("標籤名稱");
                     if (t && !defaultTags.value.includes(t)) {
                         defaultTags.value.push(t);
-                        // 可以為自訂標籤隨機分配顏色，或給統一顏色，這邊預設為統一的灰色底
                         if(!tagColorMap[t]) tagColorMap[t] = 'bg-slate-200 text-slate-700 border-slate-300';
                     }
                 };
@@ -499,6 +507,7 @@
                     trips, activeTripIndex, currentTrip, loading, loadingMsg, uploadingImage, showModal, isEditing, form, tempImageUrl, lastSyncTime, defaultTags,
                     expandedCards, toggleExpanded, isExpanded, linkify, getTagColor,
                     clipboardCard, copyCard, pasteCard,
+                    viewingImage, viewImage,
                     uploadToImgbb, addManualImage, removeImage, fetchFromCloud, saveToCloud, openCardModal, editCard, saveCard, removeCard, createNewTrip, addDay, removeDay, toggleTag, addNewTag, getDirectImageUrl, handleImageError,
                     handleDragStart, handleDragEnd, handleDrop
                 };
