@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>我的旅遊行程規劃</title>
+    <title>我的旅遊行程規劃 V1.2.0</title>
     <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
@@ -27,7 +27,7 @@
                     <span class="text-[10px] text-blue-200 mt-1">最後同步: {{ lastSyncTime }}</span>
                 </div>
                 <div class="flex items-center gap-2">
-                    <div v-if="loading" class="text-[10px] bg-white/20 px-2 py-1 rounded-full animate-pulse">同步中...</div>
+                    <div v-if="loading" class="text-[10px] bg-white/20 px-2 py-1 rounded-full animate-pulse">{{ loadingMsg }}</div>
                     <button @click="fetchFromCloud" class="p-2 hover:bg-white/10 rounded-full transition"><i class="fa-solid fa-sync"></i></button>
                     <button @click="createNewTrip" class="bg-blue-500 hover:bg-blue-400 text-white font-bold px-3 py-1 rounded-lg text-sm shadow transition">+ 新行程</button>
                 </div>
@@ -52,7 +52,7 @@
                 <div class="flex-1 overflow-y-auto px-4 pb-4 space-y-4 pt-3">
                     <div v-for="(card, cIdx) in day.cards" :key="cIdx" class="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden group hover:shadow-md transition-shadow">
                         <div v-if="card.image && card.showImage" class="img-preview flex items-center justify-center">
-                            <img :src="getDirectImageUrl(card.image)" class="max-w-full max-h-full object-contain" @error="handleImageError" @load="handleImageLoad">
+                            <img :src="card.image" class="max-w-full max-h-full object-contain">
                         </div>
                         
                         <div class="p-4">
@@ -124,14 +124,15 @@
                         </div>
 
                         <div class="bg-slate-50 p-4 rounded-2xl border-2 border-dashed border-slate-200">
-                            <label class="block text-[10px] font-black text-slate-400 mb-2 uppercase tracking-widest">圖片網址 (支援 Google Drive)</label>
-                            <input v-model="form.image" class="w-full bg-white border border-slate-200 rounded-xl p-3 text-xs outline-none focus:ring-2 ring-blue-100" placeholder="貼上照片 URL 或 Drive 分享連結">
+                            <label class="block text-[10px] font-black text-slate-400 mb-2 uppercase tracking-widest">選擇圖片上傳</label>
+                            <input type="file" @change="handleFileUpload" accept="image/*" class="w-full text-xs text-slate-500 mb-2 p-2 border border-slate-200 rounded-lg bg-white">
                             
                             <div v-if="form.image" class="mt-3 relative rounded-xl overflow-hidden border bg-slate-100">
-                                <img :src="getDirectImageUrl(form.image)" class="w-full h-32 object-contain bg-slate-900" @error="handleImageError" @load="handleImageLoad">
+                                <img :src="form.image" class="w-full h-32 object-contain bg-slate-900">
                                 <label class="absolute top-2 left-2 bg-black/60 text-white px-2 py-1 rounded text-[10px] cursor-pointer flex items-center gap-1">
                                     <input type="checkbox" v-model="form.showImage"> 顯示在封面
                                 </label>
+                                <button @click="form.image=''" class="absolute top-2 right-2 bg-red-500 text-white p-1 rounded-full text-[10px] hover:scale-110 transition"><i class="fa-solid fa-trash"></i></button>
                             </div>
                         </div>
 
@@ -146,7 +147,7 @@
                 <div class="p-6 bg-slate-50 flex gap-4">
                     <button @click="showModal = false" class="flex-1 py-4 text-slate-500 font-bold hover:bg-slate-200 rounded-2xl transition">取消</button>
                     <button @click="saveCard" class="flex-1 py-4 bg-blue-600 text-white font-bold rounded-2xl shadow-xl hover:bg-blue-700 transition" :disabled="loading">
-                        {{ loading ? '同步中...' : '確認儲存' }}
+                        {{ loading ? '資料處理中...' : '確認儲存' }}
                     </button>
                 </div>
             </div>
@@ -155,14 +156,16 @@
 
     <script>
         const { createApp, ref, computed, onMounted } = Vue;
+        // 使用你的 Google Script URL
         const CLOUD_API_URL = "https://script.google.com/macros/s/AKfycbwqzmka9Jgzdh54E_NjWDKruM1_beHY0gTvUhtt5IvWORPVnAied4zt2swJEK3l0crv/exec";
 
         createApp({
             setup() {
-                const appVersion = ref('v1.1.1');
+                const appVersion = ref('V1.2.0'); // 更新版本號
                 const trips = ref([{ name: '我的旅程', days: [{ date: 'Day 1', cards: [] }] }]);
                 const activeTripIndex = ref(0);
                 const loading = ref(false);
+                const loadingMsg = ref('同步中...');
                 const showModal = ref(false);
                 const isEditing = ref(false);
                 const lastSyncTime = ref('--:--');
@@ -172,26 +175,43 @@
 
                 const currentTrip = computed(() => trips.value[activeTripIndex.value] || trips.value[0]);
 
-                const getDirectImageUrl = (url) => {
-                    if (!url) return '';
-                    const driveMatch = url.match(/drive\.google\.com\/file\/d\/([^\/]+)/);
-                    if (driveMatch) {
-                        return `https://drive.google.com/uc?export=view&id=${driveMatch[1]}`;
-                    }
-                    return url;
+                // 高強度壓縮引擎：保證符合 Google Sheets 單格容量限制
+                const compressImage = (file) => {
+                    return new Promise((resolve) => {
+                        const reader = new FileReader();
+                        reader.readAsDataURL(file);
+                        reader.onload = (event) => {
+                            const img = new Image();
+                            img.src = event.target.result;
+                            img.onload = () => {
+                                const canvas = document.createElement('canvas');
+                                let width = img.width, height = img.height;
+                                // 最大寬度限制 600px，能大幅減少 Base64 體積
+                                if (width > 600) { height = Math.round((height * 600) / width); width = 600; }
+                                canvas.width = width; canvas.height = height;
+                                const ctx = canvas.getContext('2d');
+                                ctx.drawImage(img, 0, 0, width, height);
+                                // 品質調至 0.4，將檔案極小化以防存檔失敗
+                                resolve(canvas.toDataURL('image/jpeg', 0.4));
+                            };
+                        };
+                    });
                 };
 
-                // 核心修復：只隱藏破圖元素，絕對不動輸入框的資料
-                const handleImageError = (e) => {
-                    e.target.style.display = 'none';
-                };
-                const handleImageLoad = (e) => {
-                    e.target.style.display = 'block';
+                const handleFileUpload = async (e) => {
+                    const file = e.target.files[0];
+                    if (!file) return;
+                    loading.value = true;
+                    loadingMsg.value = '正在優化圖片...';
+                    form.value.image = await compressImage(file);
+                    form.value.showImage = true;
+                    loading.value = false;
                 };
 
                 const fetchFromCloud = async () => {
                     if (loading.value || showModal.value) return;
                     loading.value = true;
+                    loadingMsg.value = '抓取中...';
                     try {
                         const res = await fetch(CLOUD_API_URL);
                         const data = await res.json();
@@ -202,6 +222,7 @@
 
                 const saveToCloud = async () => {
                     loading.value = true;
+                    loadingMsg.value = '存檔中...';
                     try {
                         await fetch(CLOUD_API_URL, { 
                             method: "POST", 
@@ -209,7 +230,10 @@
                             headers: {"Content-Type": "text/plain"},
                             body: JSON.stringify(trips.value) 
                         });
-                        setTimeout(() => { loading.value = false; lastSyncTime.value = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); }, 1000);
+                        setTimeout(() => { 
+                            loading.value = false; 
+                            lastSyncTime.value = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); 
+                        }, 1000);
                     } catch (e) { loading.value = false; }
                 };
 
@@ -265,8 +289,8 @@
                 });
 
                 return {
-                    appVersion, trips, activeTripIndex, currentTrip, loading, showModal, isEditing, form, lastSyncTime, defaultTags,
-                    fetchFromCloud, saveToCloud, openCardModal, editCard, saveCard, removeCard, createNewTrip, addDay, removeDay, toggleTag, addNewTag, getDirectImageUrl, handleImageError, handleImageLoad
+                    appVersion, trips, activeTripIndex, currentTrip, loading, loadingMsg, showModal, isEditing, form, lastSyncTime, defaultTags,
+                    handleFileUpload, fetchFromCloud, saveToCloud, openCardModal, editCard, saveCard, removeCard, createNewTrip, addDay, removeDay, toggleTag, addNewTag
                 };
             }
         }).mount('#app');
