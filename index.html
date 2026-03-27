@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>我的旅遊行程規劃 V1.2.0</title>
+    <title>我的旅遊行程規劃 V1.3.0</title>
     <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
@@ -52,7 +52,7 @@
                 <div class="flex-1 overflow-y-auto px-4 pb-4 space-y-4 pt-3">
                     <div v-for="(card, cIdx) in day.cards" :key="cIdx" class="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden group hover:shadow-md transition-shadow">
                         <div v-if="card.image && card.showImage" class="img-preview flex items-center justify-center">
-                            <img :src="card.image" class="max-w-full max-h-full object-contain">
+                            <img :src="getDirectImageUrl(card.image)" class="max-w-full max-h-full object-contain" @error="handleImageError">
                         </div>
                         
                         <div class="p-4">
@@ -124,15 +124,17 @@
                         </div>
 
                         <div class="bg-slate-50 p-4 rounded-2xl border-2 border-dashed border-slate-200">
-                            <label class="block text-[10px] font-black text-slate-400 mb-2 uppercase tracking-widest">選擇圖片上傳</label>
-                            <input type="file" @change="handleFileUpload" accept="image/*" class="w-full text-xs text-slate-500 mb-2 p-2 border border-slate-200 rounded-lg bg-white">
+                            <label class="block text-[10px] font-black text-slate-400 mb-2 uppercase tracking-widest">選擇圖片上傳 (支援直接選取)</label>
+                            
+                            <input type="file" @change="uploadToImgbb" accept="image/*" class="w-full text-xs text-slate-500 mb-3 p-2 border border-slate-200 rounded-lg bg-white" :disabled="uploadingImage">
+                            
+                            <input v-model="form.image" class="w-full bg-white border border-slate-200 rounded-xl p-3 text-xs outline-none focus:ring-2 ring-blue-100" placeholder="或在此直接貼上網址 (支援 Google Drive)">
                             
                             <div v-if="form.image" class="mt-3 relative rounded-xl overflow-hidden border bg-slate-100">
-                                <img :src="form.image" class="w-full h-32 object-contain bg-slate-900">
+                                <img :src="getDirectImageUrl(form.image)" class="w-full h-32 object-contain bg-slate-900" @error="handleImageError">
                                 <label class="absolute top-2 left-2 bg-black/60 text-white px-2 py-1 rounded text-[10px] cursor-pointer flex items-center gap-1">
                                     <input type="checkbox" v-model="form.showImage"> 顯示在封面
                                 </label>
-                                <button @click="form.image=''" class="absolute top-2 right-2 bg-red-500 text-white p-1 rounded-full text-[10px] hover:scale-110 transition"><i class="fa-solid fa-trash"></i></button>
                             </div>
                         </div>
 
@@ -145,9 +147,9 @@
                     </div>
                 </div>
                 <div class="p-6 bg-slate-50 flex gap-4">
-                    <button @click="showModal = false" class="flex-1 py-4 text-slate-500 font-bold hover:bg-slate-200 rounded-2xl transition">取消</button>
-                    <button @click="saveCard" class="flex-1 py-4 bg-blue-600 text-white font-bold rounded-2xl shadow-xl hover:bg-blue-700 transition" :disabled="loading">
-                        {{ loading ? '資料處理中...' : '確認儲存' }}
+                    <button @click="showModal = false" class="flex-1 py-4 text-slate-500 font-bold hover:bg-slate-200 rounded-2xl transition" :disabled="uploadingImage">取消</button>
+                    <button @click="saveCard" class="flex-1 py-4 bg-blue-600 text-white font-bold rounded-2xl shadow-xl hover:bg-blue-700 transition" :disabled="loading || uploadingImage">
+                        {{ loading ? '資料同步中...' : (uploadingImage ? '上傳圖床中...' : '確認儲存') }}
                     </button>
                 </div>
             </div>
@@ -156,15 +158,20 @@
 
     <script>
         const { createApp, ref, computed, onMounted } = Vue;
-        // 使用你的 Google Script URL
         const CLOUD_API_URL = "https://script.google.com/macros/s/AKfycbwqzmka9Jgzdh54E_NjWDKruM1_beHY0gTvUhtt5IvWORPVnAied4zt2swJEK3l0crv/exec";
+        
+        // ==========================================
+        // 重要：請在這裡填入你的 ImgBB API Key！
+        // ==========================================
+        const IMGBB_API_KEY = "請將此處替換為你的API_KEY"; 
 
         createApp({
             setup() {
-                const appVersion = ref('V1.2.0'); // 更新版本號
-                const trips = ref([{ name: '我的旅程', days: [{ date: 'Day 1', cards: [] }] }]);
+                const appVersion = ref('V1.3.0');
+                const trips = ref([{ name: '新增旅程', days: [{ date: 'Day 1', cards: [] }] }]);
                 const activeTripIndex = ref(0);
                 const loading = ref(false);
+                const uploadingImage = ref(false);
                 const loadingMsg = ref('同步中...');
                 const showModal = ref(false);
                 const isEditing = ref(false);
@@ -175,54 +182,84 @@
 
                 const currentTrip = computed(() => trips.value[activeTripIndex.value] || trips.value[0]);
 
-                // 高強度壓縮引擎：保證符合 Google Sheets 單格容量限制
-                const compressImage = (file) => {
-                    return new Promise((resolve) => {
-                        const reader = new FileReader();
-                        reader.readAsDataURL(file);
-                        reader.onload = (event) => {
-                            const img = new Image();
-                            img.src = event.target.result;
-                            img.onload = () => {
-                                const canvas = document.createElement('canvas');
-                                let width = img.width, height = img.height;
-                                // 最大寬度限制 600px，能大幅減少 Base64 體積
-                                if (width > 600) { height = Math.round((height * 600) / width); width = 600; }
-                                canvas.width = width; canvas.height = height;
-                                const ctx = canvas.getContext('2d');
-                                ctx.drawImage(img, 0, 0, width, height);
-                                // 品質調至 0.4，將檔案極小化以防存檔失敗
-                                resolve(canvas.toDataURL('image/jpeg', 0.4));
-                            };
-                        };
-                    });
-                };
-
-                const handleFileUpload = async (e) => {
+                // 串接 ImgBB API 處理圖片上傳
+                const uploadToImgbb = async (e) => {
                     const file = e.target.files[0];
                     if (!file) return;
+
+                    if (IMGBB_API_KEY === "請將此處替換為你的API_KEY") {
+                        alert("請先在程式碼中設定你的 ImgBB API Key！");
+                        return;
+                    }
+
+                    uploadingImage.value = true;
+                    loadingMsg.value = '圖片上傳圖床中...';
                     loading.value = true;
-                    loadingMsg.value = '正在優化圖片...';
-                    form.value.image = await compressImage(file);
-                    form.value.showImage = true;
-                    loading.value = false;
+
+                    const formData = new FormData();
+                    formData.append('image', file);
+
+                    try {
+                        const response = await fetch(`https://api.imgbb.com/1/upload?key=${IMGBB_API_KEY}`, {
+                            method: 'POST',
+                            body: formData
+                        });
+                        const data = await response.json();
+                        
+                        if (data.success) {
+                            // 成功取得圖床回傳的短網址
+                            form.value.image = data.data.url;
+                            form.value.showImage = true;
+                        } else {
+                            alert("圖片上傳失敗：" + data.error.message);
+                        }
+                    } catch (err) {
+                        console.error("上傳發生錯誤:", err);
+                        alert("無法連線至圖床，請檢查網路狀態");
+                    } finally {
+                        uploadingImage.value = false;
+                        loading.value = false;
+                        loadingMsg.value = '同步中...';
+                    }
+                };
+
+                const getDirectImageUrl = (url) => {
+                    if (!url) return '';
+                    const driveMatch = url.match(/drive\.google\.com\/file\/d\/([^\/]+)/);
+                    if (driveMatch) {
+                        return `https://drive.google.com/uc?export=view&id=${driveMatch[1]}`;
+                    }
+                    return url;
+                };
+
+                const handleImageError = (e) => {
+                    e.target.style.display = 'none';
                 };
 
                 const fetchFromCloud = async () => {
                     if (loading.value || showModal.value) return;
                     loading.value = true;
-                    loadingMsg.value = '抓取中...';
+                    loadingMsg.value = '抓取資料中...';
                     try {
                         const res = await fetch(CLOUD_API_URL);
-                        const data = await res.json();
-                        if (Array.isArray(data)) trips.value = data;
+                        const text = await res.text();
+                        if (text && text.trim() !== "") {
+                            try {
+                                const data = JSON.parse(text);
+                                if (Array.isArray(data) && data.length > 0) {
+                                    trips.value = data;
+                                }
+                            } catch (parseErr) {
+                                console.log("解析 JSON 失敗，可能是空資料或格式錯誤", parseErr);
+                            }
+                        }
                         lastSyncTime.value = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
                     } catch (e) { console.error(e); } finally { loading.value = false; }
                 };
 
                 const saveToCloud = async () => {
                     loading.value = true;
-                    loadingMsg.value = '存檔中...';
+                    loadingMsg.value = '儲存至雲端...';
                     try {
                         await fetch(CLOUD_API_URL, { 
                             method: "POST", 
@@ -289,8 +326,8 @@
                 });
 
                 return {
-                    appVersion, trips, activeTripIndex, currentTrip, loading, loadingMsg, showModal, isEditing, form, lastSyncTime, defaultTags,
-                    handleFileUpload, fetchFromCloud, saveToCloud, openCardModal, editCard, saveCard, removeCard, createNewTrip, addDay, removeDay, toggleTag, addNewTag
+                    appVersion, trips, activeTripIndex, currentTrip, loading, loadingMsg, uploadingImage, showModal, isEditing, form, lastSyncTime, defaultTags,
+                    uploadToImgbb, fetchFromCloud, saveToCloud, openCardModal, editCard, saveCard, removeCard, createNewTrip, addDay, removeDay, toggleTag, addNewTag, getDirectImageUrl, handleImageError
                 };
             }
         }).mount('#app');
