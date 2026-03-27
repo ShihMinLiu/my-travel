@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>旅遊協作板 - 自動同步版</title>
+    <title>旅遊協作板 - 自定義標題版</title>
     <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
@@ -41,15 +41,15 @@
 
         <main class="flex-1 overflow-x-auto overflow-y-hidden p-6 flex gap-6">
             <div v-for="(day, dIdx) in currentTrip.days" :key="dIdx" class="column flex flex-col bg-slate-200/50 rounded-2xl border border-slate-300">
-                <div class="p-4 flex justify-between items-center">
-                    <input v-model="day.date" @change="saveToCloud" class="bg-transparent font-black text-slate-700 w-full focus:outline-none">
-                    <div class="flex gap-1">
+                <div class="p-4 flex justify-between items-center bg-slate-300/30 rounded-t-2xl">
+                    <input v-model="day.date" @blur="saveToCloud" class="bg-transparent font-black text-slate-700 w-full focus:outline-none border-b border-transparent focus:border-indigo-400 p-1" placeholder="輸入名稱 (如: Day 1)">
+                    <div class="flex gap-1 ml-2">
                         <button v-if="clipboard" @click="pasteCard(dIdx)" class="text-indigo-600 p-1"><i class="fa-solid fa-paste"></i></button>
                         <button @click="removeDay(dIdx)" class="text-slate-400 hover:text-red-500 p-1"><i class="fa-solid fa-trash-can"></i></button>
                     </div>
                 </div>
 
-                <div class="flex-1 overflow-y-auto px-3 pb-4 space-y-4">
+                <div class="flex-1 overflow-y-auto px-3 pb-4 space-y-4 pt-4">
                     <div v-for="(card, cIdx) in day.cards" :key="cIdx" class="bg-white p-4 rounded-xl shadow-sm relative group border-b-4 border-indigo-100">
                         <div class="flex justify-between items-start mb-2">
                             <h3 class="font-bold text-slate-800 flex-1 leading-tight">{{ card.title }}</h3>
@@ -71,16 +71,16 @@
                         </div>
 
                         <div class="flex flex-wrap gap-2">
-                            <a v-if="card.mapLink" :href="card.mapLink" target="_blank" class="text-[9px] font-bold bg-red-50 text-red-600 px-2 py-0.5 rounded border border-red-100 uppercase">Maps</a>
-                            <a v-if="card.url" :href="card.url" target="_blank" class="text-[9px] font-bold bg-blue-50 text-blue-600 px-2 py-0.5 rounded border border-blue-100 uppercase">Link</a>
+                            <a v-if="card.mapLink" :href="card.mapLink" target="_blank" class="text-[9px] font-bold bg-red-50 text-red-600 px-2 py-0.5 rounded border border-red-100 uppercase tracking-tighter">Maps</a>
+                            <a v-if="card.url" :href="card.url" target="_blank" class="text-[9px] font-bold bg-blue-50 text-blue-600 px-2 py-0.5 rounded border border-blue-100 uppercase tracking-tighter">Link</a>
                         </div>
                     </div>
-                    <button @click="openCardModal(dIdx)" class="w-full py-3 border-2 border-dashed border-slate-300 text-slate-400 rounded-xl hover:bg-white transition-all">+ 新增項目</button>
+                    <button @click="openCardModal(dIdx)" class="w-full py-3 border-2 border-dashed border-slate-300 text-slate-400 rounded-xl hover:bg-white transition-all font-bold">+ 新增項目</button>
                 </div>
             </div>
             <button @click="addDay" class="column flex flex-col items-center justify-center bg-white/30 border-2 border-dashed border-slate-300 rounded-2xl text-slate-400 hover:bg-white transition-all">
                 <i class="fa-solid fa-plus-circle text-2xl mb-1"></i>
-                <span class="font-bold text-xs">新增日期</span>
+                <span class="font-bold text-xs">新增欄位</span>
             </button>
         </main>
 
@@ -111,11 +111,12 @@
 
     <script>
         const { createApp, ref, computed, onMounted, onUnmounted } = Vue;
+        // 你的 Google Script URL
         const CLOUD_API_URL = "https://script.google.com/macros/s/AKfycbz2pfKFYg66Z2TB8Wkdl7a1_im5A_A3iyIA3avst_OZVoNKoH1eJERnoKRFmu9XCWep/exec";
 
         createApp({
             setup() {
-                const trips = ref([{ name: '我的旅程', days: [{ date: 'Day 1', cards: [] }] }]);
+                const trips = ref([{ name: '我的旅程', days: [{ date: '新日期', cards: [] }] }]);
                 const activeTripIndex = ref(0);
                 const loading = ref(false);
                 const showModal = ref(false);
@@ -156,10 +157,8 @@
                     } catch (e) { loading.value = false; }
                 };
 
-                // 自動同步設定：每 30 秒執行一次 fetchFromCloud
                 const startAutoSync = () => {
                     syncTimer = setInterval(() => {
-                        // 只有在沒在編輯(Modal關閉)時才自動更新，避免打斷使用者輸入
                         if (!showModal.value && !loading.value) {
                             fetchFromCloud();
                         }
@@ -168,10 +167,10 @@
 
                 const createNewTrip = () => {
                     const name = prompt('行程名稱？', '新行程');
-                    if (name) { trips.value.push({ name, days: [{ date: 'Day 1', cards: [] }] }); activeTripIndex.value = trips.value.length - 1; saveToCloud(); }
+                    if (name) { trips.value.push({ name, days: [{ date: '備註欄', cards: [] }] }); activeTripIndex.value = trips.value.length - 1; saveToCloud(); }
                 };
 
-                const addDay = () => { currentTrip.value.days.push({ date: `Day ${currentTrip.value.days.length + 1}`, cards: [] }); saveToCloud(); };
+                const addDay = () => { currentTrip.value.days.push({ date: `新日期`, cards: [] }); saveToCloud(); };
                 const removeDay = (idx) => { if (confirm('確定刪除？')) { currentTrip.value.days.splice(idx, 1); saveToCloud(); } };
                 const openCardModal = (dayIdx) => { isEditing.value = false; editingPos.value.day = dayIdx; form.value = { title: '', desc: '', image: '', mapLink: '', url: '', checklist: [] }; showModal.value = true; };
                 const editCard = (dayIdx, cardIdx) => { isEditing.value = true; editingPos.value = { day: dayIdx, card: cardIdx }; form.value = JSON.parse(JSON.stringify(currentTrip.value.days[dayIdx].cards[cardIdx])); showModal.value = true; };
@@ -185,9 +184,7 @@
                     startAutoSync();
                 });
 
-                onUnmounted(() => {
-                    if (syncTimer) clearInterval(syncTimer);
-                });
+                onUnmounted(() => { if (syncTimer) clearInterval(syncTimer); });
 
                 return {
                     trips, activeTripIndex, currentTrip, loading, showModal, isEditing, form, clipboard, lastSyncTime,
