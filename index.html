@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>我的旅遊行程規劃 V1.9.3</title>
+    <title>我的旅遊行程規劃 V1.9.4</title>
     <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
@@ -61,14 +61,24 @@
                     </div>
                 </div>
                 
-                <div class="flex gap-2 overflow-x-auto no-scrollbar pb-1">
-                    <button v-for="(trip, index) in trips" :key="index" @click="activeTripIndex = index"
-                        :class="['px-5 py-1.5 rounded-full text-sm whitespace-nowrap transition-all flex items-center gap-2', 
+                <div class="flex gap-2 overflow-x-auto no-scrollbar pb-1" @dragover.prevent @dragenter.prevent>
+                    <button v-for="(trip, index) in trips" :key="'trip-'+index" 
+                        draggable="true"
+                        @dragstart="handleTripDragStart(index, $event)"
+                        @dragend="handleTripDragEnd($event)"
+                        @drop.stop="handleTripDrop(index)"
+                        @dragover.prevent
+                        @dragenter.prevent
+                        @click="activeTripIndex = index"
+                        :class="['px-4 py-1.5 rounded-full text-sm whitespace-nowrap transition-all flex items-center gap-2 cursor-grab active:cursor-grabbing', 
                                  activeTripIndex === index ? 'bg-white text-blue-900 font-bold shadow-md' : 'bg-white/10 text-blue-100 hover:bg-white/20']">
+                        
+                        <i class="fa-solid fa-grip-vertical opacity-40 text-[10px]"></i>
                         <span>{{ trip.name }}</span>
-                        <div v-if="activeTripIndex === index" class="flex gap-2 ml-1 border-l border-slate-200 pl-2 text-slate-400">
-                            <i class="fa-solid fa-pen hover:text-blue-600 transition" @click.stop="editTripName" title="編輯行程名稱"></i>
-                            <i class="fa-solid fa-trash hover:text-red-500 transition" @click.stop="deleteTrip" title="刪除此行程"></i>
+                        
+                        <div v-if="activeTripIndex === index" class="flex gap-2 ml-1 border-l border-slate-200 pl-2 text-slate-400 clickable-area">
+                            <i class="fa-solid fa-pen hover:text-blue-600 transition cursor-pointer" @click.stop="editTripName" title="編輯行程名稱"></i>
+                            <i class="fa-solid fa-trash hover:text-red-500 transition cursor-pointer" @click.stop="deleteTrip" title="刪除此行程"></i>
                         </div>
                     </button>
                 </div>
@@ -275,7 +285,7 @@
 
         createApp({
             setup() {
-                const appVersion = ref('V1.9.3');
+                const appVersion = ref('V1.9.4');
                 const isLoggedIn = ref(false);
                 const loginPassword = ref('');
                 
@@ -309,6 +319,7 @@
                 
                 const editingPos = ref({ day: 0, card: 0 });
                 const dragInfo = ref({ type: null, dIdx: null, cIdx: null });
+                const dragTripIndex = ref(null); // 新增：用於追蹤行程分頁的拖曳
                 const expandedCards = ref({});
                 const clipboardCard = ref(null); 
 
@@ -346,7 +357,6 @@
                     }
                 };
 
-                // --- 行程管理：修改名稱與刪除 ---
                 const editTripName = () => {
                     const newName = prompt('請輸入新的行程名稱：', currentTrip.value.name);
                     if (newName && newName.trim() !== '') {
@@ -360,11 +370,10 @@
                     if (pwd === SECRET_PASSWORD) {
                         if (confirm(`⚠️ 警告！確定要永久刪除「${currentTrip.value.name}」嗎？此動作無法復原！`)) {
                             trips.value.splice(activeTripIndex.value, 1);
-                            // 若所有行程都刪光了，給一個預設的空行程
                             if (trips.value.length === 0) {
                                 trips.value.push({ name: '新旅程', days: [{ date: 'Day 1', cards: [] }] });
                             }
-                            activeTripIndex.value = 0; // 重置回第一個分頁
+                            activeTripIndex.value = 0; 
                             saveToCloud();
                         }
                     } else if (pwd !== null) {
@@ -397,6 +406,7 @@
                     return text.replace(/</g, "<").replace(/>/g, ">").replace(urlRegex, (url) => `<a href="${url}" target="_blank" class="text-blue-500 font-bold underline" onclick="event.stopPropagation()">${url}</a>`).replace(/\n/g, '<br/>');
                 };
 
+                // --- 內部元素拖曳 (天數、卡片) ---
                 const handleDragStart = (type, dIdx, cIdx, event) => {
                     dragInfo.value = { type, dIdx, cIdx };
                     event.dataTransfer.effectAllowed = 'move';
@@ -419,6 +429,33 @@
                         if (targetCIdx !== null) currentTrip.value.days[targetDIdx].cards.splice(targetCIdx, 0, movedCard);
                         else currentTrip.value.days[targetDIdx].cards.push(movedCard);
                     }
+                    saveToCloud();
+                };
+
+                // --- 行程分頁拖曳排序 ---
+                const handleTripDragStart = (index, event) => {
+                    dragTripIndex.value = index;
+                    event.dataTransfer.effectAllowed = 'move';
+                    setTimeout(() => event.target.classList.add('opacity-50'), 0);
+                };
+                const handleTripDragEnd = (event) => {
+                    event.target.classList.remove('opacity-50');
+                    dragTripIndex.value = null;
+                };
+                const handleTripDrop = (targetIndex) => {
+                    const sourceIndex = dragTripIndex.value;
+                    if (sourceIndex === null || sourceIndex === targetIndex) return;
+
+                    // 記住目前正在編輯的行程物件
+                    const activeTripObj = trips.value[activeTripIndex.value];
+
+                    // 陣列重新排序
+                    const movedTrip = trips.value.splice(sourceIndex, 1)[0];
+                    trips.value.splice(targetIndex, 0, movedTrip);
+
+                    // 找回正在編輯的行程的新位置，保持畫面焦點
+                    activeTripIndex.value = trips.value.indexOf(activeTripObj);
+
                     saveToCloud();
                 };
 
@@ -559,9 +596,10 @@
                     expandedCards, toggleExpanded, isExpanded, linkify, getTagColor,
                     clipboardCard, copyCard, pasteCard,
                     viewingImage, viewImage,
-                    editTripName, deleteTrip, // 新增的行程管理功能
+                    editTripName, deleteTrip,
                     uploadToImgbb, addManualImage, removeImage, fetchFromCloud, saveToCloud, openCardModal, editCard, saveCard, removeCard, createNewTrip, addDay, removeDay, toggleTag, addNewTag, getDirectImageUrl, handleImageError,
-                    handleDragStart, handleDragEnd, handleDrop
+                    handleDragStart, handleDragEnd, handleDrop,
+                    handleTripDragStart, handleTripDragEnd, handleTripDrop // 新增的行程分頁拖曳
                 };
             }
         }).mount('#app');
