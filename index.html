@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>我的旅遊行程規劃 V1.9.2</title>
+    <title>我的旅遊行程規劃 V1.9.3</title>
     <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
@@ -63,9 +63,13 @@
                 
                 <div class="flex gap-2 overflow-x-auto no-scrollbar pb-1">
                     <button v-for="(trip, index) in trips" :key="index" @click="activeTripIndex = index"
-                        :class="['px-5 py-1.5 rounded-full text-sm whitespace-nowrap transition-all', 
+                        :class="['px-5 py-1.5 rounded-full text-sm whitespace-nowrap transition-all flex items-center gap-2', 
                                  activeTripIndex === index ? 'bg-white text-blue-900 font-bold shadow-md' : 'bg-white/10 text-blue-100 hover:bg-white/20']">
-                        {{ trip.name }}
+                        <span>{{ trip.name }}</span>
+                        <div v-if="activeTripIndex === index" class="flex gap-2 ml-1 border-l border-slate-200 pl-2 text-slate-400">
+                            <i class="fa-solid fa-pen hover:text-blue-600 transition" @click.stop="editTripName" title="編輯行程名稱"></i>
+                            <i class="fa-solid fa-trash hover:text-red-500 transition" @click.stop="deleteTrip" title="刪除此行程"></i>
+                        </div>
                     </button>
                 </div>
             </header>
@@ -271,7 +275,7 @@
 
         createApp({
             setup() {
-                const appVersion = ref('V1.9.2');
+                const appVersion = ref('V1.9.3');
                 const isLoggedIn = ref(false);
                 const loginPassword = ref('');
                 
@@ -339,6 +343,32 @@
                         currentTrip.value.days[dayIdx].cards.push(newCard);
                         saveToCloud();
                         clipboardCard.value = null; 
+                    }
+                };
+
+                // --- 行程管理：修改名稱與刪除 ---
+                const editTripName = () => {
+                    const newName = prompt('請輸入新的行程名稱：', currentTrip.value.name);
+                    if (newName && newName.trim() !== '') {
+                        currentTrip.value.name = newName.trim();
+                        saveToCloud();
+                    }
+                };
+
+                const deleteTrip = () => {
+                    const pwd = prompt(`請輸入密碼以確認刪除行程「${currentTrip.value.name}」：`);
+                    if (pwd === SECRET_PASSWORD) {
+                        if (confirm(`⚠️ 警告！確定要永久刪除「${currentTrip.value.name}」嗎？此動作無法復原！`)) {
+                            trips.value.splice(activeTripIndex.value, 1);
+                            // 若所有行程都刪光了，給一個預設的空行程
+                            if (trips.value.length === 0) {
+                                trips.value.push({ name: '新旅程', days: [{ date: 'Day 1', cards: [] }] });
+                            }
+                            activeTripIndex.value = 0; // 重置回第一個分頁
+                            saveToCloud();
+                        }
+                    } else if (pwd !== null) {
+                        alert('密碼錯誤，刪除操作已取消。');
                     }
                 };
 
@@ -529,6 +559,7 @@
                     expandedCards, toggleExpanded, isExpanded, linkify, getTagColor,
                     clipboardCard, copyCard, pasteCard,
                     viewingImage, viewImage,
+                    editTripName, deleteTrip, // 新增的行程管理功能
                     uploadToImgbb, addManualImage, removeImage, fetchFromCloud, saveToCloud, openCardModal, editCard, saveCard, removeCard, createNewTrip, addDay, removeDay, toggleTag, addNewTag, getDirectImageUrl, handleImageError,
                     handleDragStart, handleDragEnd, handleDrop
                 };
