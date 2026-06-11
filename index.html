@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>我的旅遊行程規劃 V1.9.5</title>
+    <title>我的旅遊行程規劃 V1.9.6</title>
     <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
@@ -18,7 +18,7 @@
     </style>
 </head>
 <body class="bg-slate-50 text-slate-900 font-sans">
-    <div id="app" class="h-screen flex flex-col" @click="clearClipboard">
+    <div id="app" class="h-screen flex flex-col">
         
         <div v-if="viewingImage" class="fixed inset-0 z-[100] flex items-center justify-center bg-black/90 p-4 animate-in fade-in duration-200" @click.stop="viewingImage = null">
             <button class="absolute top-4 right-4 text-white hover:text-red-500 text-3xl transition"><i class="fa-solid fa-xmark"></i></button>
@@ -180,8 +180,8 @@
                 </button>
             </main>
 
-            <div v-if="showModal" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-sm" @click.stop>
-                <div class="bg-white w-full max-w-lg rounded-3xl shadow-2xl overflow-hidden animate-in zoom-in duration-200">
+            <div v-if="showModal" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-sm" @click.stop="showModal = false">
+                <div class="bg-white w-full max-w-lg rounded-3xl shadow-2xl overflow-hidden animate-in zoom-in duration-200" @click.stop>
                     <div class="p-6 overflow-y-auto max-h-[85vh]">
                         <h2 class="text-xl font-black text-slate-800 mb-6 border-l-4 border-blue-600 pl-3">編輯細節</h2>
                         <div class="space-y-6">
@@ -285,7 +285,7 @@
 
         createApp({
             setup() {
-                const appVersion = ref('V1.9.5');
+                const appVersion = ref('V1.9.6');
                 const isLoggedIn = ref(false);
                 const loginPassword = ref('');
                 
@@ -343,10 +343,8 @@
                     defaultTags.value = Array.from(usedTags);
                 };
 
-                // --- 複製、貼上與取消複製 ---
                 const copyCard = (cardData) => {
                     clipboardCard.value = JSON.parse(JSON.stringify(cardData));
-                    // 移除了 alert，讓操作更順暢！
                 };
 
                 const pasteCard = (dayIdx) => {
@@ -358,7 +356,6 @@
                     }
                 };
 
-                // 新增：點擊空白處清空剪貼簿
                 const clearClipboard = () => {
                     if (clipboardCard.value) {
                         clipboardCard.value = null;
@@ -587,13 +584,29 @@
                     setInterval(() => {
                         if (isLoggedIn.value) fetchFromCloud(); 
                     }, 40000);
+
+                    // 加入全域點擊監聽，點擊畫面任一處都會清空剪貼簿
+                    window.addEventListener('click', () => {
+                        if (clipboardCard.value) {
+                            clipboardCard.value = null;
+                        }
+                    });
+
+                    // 加入鍵盤監聽：按 ESC 鍵也能快速取消
+                    window.addEventListener('keydown', (e) => {
+                        if (e.key === 'Escape') {
+                            clipboardCard.value = null;
+                            viewingImage.value = null;
+                            showModal.value = false;
+                        }
+                    });
                 });
 
                 return {
                     appVersion, isLoggedIn, loginPassword, handleLogin,
                     trips, activeTripIndex, currentTrip, loading, loadingMsg, uploadingImage, showModal, isEditing, form, tempImageUrl, lastSyncTime, defaultTags,
                     expandedCards, toggleExpanded, isExpanded, linkify, getTagColor,
-                    clipboardCard, copyCard, pasteCard, clearClipboard, // 新增了 clearClipboard
+                    clipboardCard, copyCard, pasteCard, clearClipboard,
                     viewingImage, viewImage,
                     editTripName, deleteTrip,
                     uploadToImgbb, addManualImage, removeImage, fetchFromCloud, saveToCloud, openCardModal, editCard, saveCard, removeCard, createNewTrip, addDay, removeDay, toggleTag, addNewTag, getDirectImageUrl, handleImageError,
