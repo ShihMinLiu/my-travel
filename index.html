@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>我的旅遊行程規劃 V1.9.6</title>
+    <title>我的旅遊行程規劃 V1.9.7</title>
     <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
@@ -18,11 +18,26 @@
     </style>
 </head>
 <body class="bg-slate-50 text-slate-900 font-sans">
-    <div id="app" class="h-screen flex flex-col">
+    <div id="app" class="h-screen flex flex-col" @click="clearClipboard">
         
         <div v-if="viewingImage" class="fixed inset-0 z-[100] flex items-center justify-center bg-black/90 p-4 animate-in fade-in duration-200" @click.stop="viewingImage = null">
             <button class="absolute top-4 right-4 text-white hover:text-red-500 text-3xl transition"><i class="fa-solid fa-xmark"></i></button>
             <img :src="viewingImage" class="max-w-full max-h-full object-contain rounded-lg shadow-2xl" @click.stop>
+        </div>
+
+        <div v-if="viewingDescCard" class="fixed inset-0 z-[110] flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-sm animate-in fade-in duration-200" @click.stop="viewingDescCard = null">
+            <div class="bg-white w-full max-w-md rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-[80vh]" @click.stop>
+                <div class="p-4 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+                    <h3 class="font-black text-slate-800 text-lg flex-1 pr-2 truncate"><i class="fa-regular fa-file-lines text-blue-500 mr-2"></i>{{ viewingDescCard.title }}</h3>
+                    <button @click="viewingDescCard = null" class="text-slate-400 hover:text-red-500 transition w-8 h-8 flex items-center justify-center rounded-full hover:bg-red-50"><i class="fa-solid fa-xmark text-lg"></i></button>
+                </div>
+                <div class="p-6 overflow-y-auto flex-1">
+                    <div class="text-sm text-slate-700 whitespace-pre-wrap break-words leading-relaxed" v-html="linkify(viewingDescCard.desc)"></div>
+                </div>
+                <div class="p-4 border-t border-slate-100 bg-slate-50">
+                    <button @click="viewingDescCard = null" class="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl transition-all active:scale-95 shadow-md">關閉</button>
+                </div>
+            </div>
         </div>
 
         <div v-if="!isLoggedIn" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900 px-4">
@@ -140,10 +155,13 @@
                                     </div>
                                 </div>
                                 
-                                <div v-if="card.desc" class="mb-3 bg-slate-50 p-3 rounded-xl border border-slate-100 cursor-pointer hover:bg-slate-100 transition clickable-area" @click.stop="toggleExpanded(dIdx, cIdx)">
-                                    <div v-if="!isExpanded(dIdx, cIdx)" class="text-xs text-slate-500 line-clamp-2">{{ card.desc }}</div>
-                                    <div v-else class="text-xs text-slate-700 whitespace-pre-wrap break-words" v-html="linkify(card.desc)"></div>
-                                    <div class="text-center text-slate-300 mt-1"><i :class="isExpanded(dIdx, cIdx) ? 'fa-solid fa-chevron-up text-[9px]' : 'fa-solid fa-chevron-down text-[9px]'"></i></div>
+                                <div v-if="card.desc" class="mb-3 bg-slate-50 p-3 rounded-xl border border-slate-100 cursor-pointer hover:bg-slate-100 transition clickable-area group/desc" @click.stop="viewDesc(card)">
+                                    <div class="text-xs text-slate-500 line-clamp-2">
+                                        {{ card.desc }}
+                                    </div>
+                                    <div class="text-center text-slate-400 mt-2 opacity-60 group-hover/desc:opacity-100 transition">
+                                        <i class="fa-solid fa-up-right-and-down-left-from-center text-[10px]"></i> <span class="text-[10px] ml-1">點擊查看完整備註</span>
+                                    </div>
                                 </div>
 
                                 <div v-if="card.checklist && card.checklist.length" class="mb-3 space-y-1 bg-slate-50 p-2 rounded-xl border border-slate-100 clickable-area">
@@ -285,7 +303,7 @@
 
         createApp({
             setup() {
-                const appVersion = ref('V1.9.6');
+                const appVersion = ref('V1.9.7');
                 const isLoggedIn = ref(false);
                 const loginPassword = ref('');
                 
@@ -298,8 +316,11 @@
                 const isEditing = ref(false);
                 const lastSyncTime = ref('--:--');
                 
+                // 圖片放大檢視與內文彈窗檢視
                 const viewingImage = ref(null);
                 const viewImage = (url) => { viewingImage.value = url; };
+                const viewingDescCard = ref(null);
+                const viewDesc = (card) => { viewingDescCard.value = card; };
 
                 const tagColorMap = {
                     '機票': 'bg-sky-100 text-sky-700 border-sky-200',
@@ -320,7 +341,6 @@
                 const editingPos = ref({ day: 0, card: 0 });
                 const dragInfo = ref({ type: null, dIdx: null, cIdx: null });
                 const dragTripIndex = ref(null);
-                const expandedCards = ref({});
                 const clipboardCard = ref(null); 
 
                 const currentTrip = computed(() => trips.value[activeTripIndex.value] || trips.value[0]);
@@ -403,8 +423,6 @@
                     } catch (e) { alert('連線失敗'); } finally { loading.value = false; }
                 };
 
-                const toggleExpanded = (dIdx, cIdx) => { expandedCards.value[`${dIdx}-${cIdx}`] = !expandedCards.value[`${dIdx}-${cIdx}`]; };
-                const isExpanded = (dIdx, cIdx) => !!expandedCards.value[`${dIdx}-${cIdx}`];
                 const linkify = (text) => {
                     if (!text) return '';
                     const urlRegex = /(https?:\/\/[^\s]+)/g;
@@ -585,18 +603,17 @@
                         if (isLoggedIn.value) fetchFromCloud(); 
                     }, 40000);
 
-                    // 加入全域點擊監聽，點擊畫面任一處都會清空剪貼簿
+                    // 全域點擊監聽
                     window.addEventListener('click', () => {
-                        if (clipboardCard.value) {
-                            clipboardCard.value = null;
-                        }
+                        if (clipboardCard.value) clipboardCard.value = null;
                     });
 
-                    // 加入鍵盤監聽：按 ESC 鍵也能快速取消
+                    // 鍵盤監聽：按 ESC 鍵也能快速取消或關閉彈窗
                     window.addEventListener('keydown', (e) => {
                         if (e.key === 'Escape') {
                             clipboardCard.value = null;
                             viewingImage.value = null;
+                            viewingDescCard.value = null;
                             showModal.value = false;
                         }
                     });
@@ -605,9 +622,9 @@
                 return {
                     appVersion, isLoggedIn, loginPassword, handleLogin,
                     trips, activeTripIndex, currentTrip, loading, loadingMsg, uploadingImage, showModal, isEditing, form, tempImageUrl, lastSyncTime, defaultTags,
-                    expandedCards, toggleExpanded, isExpanded, linkify, getTagColor,
+                    linkify, getTagColor,
                     clipboardCard, copyCard, pasteCard, clearClipboard,
-                    viewingImage, viewImage,
+                    viewingImage, viewImage, viewingDescCard, viewDesc,
                     editTripName, deleteTrip,
                     uploadToImgbb, addManualImage, removeImage, fetchFromCloud, saveToCloud, openCardModal, editCard, saveCard, removeCard, createNewTrip, addDay, removeDay, toggleTag, addNewTag, getDirectImageUrl, handleImageError,
                     handleDragStart, handleDragEnd, handleDrop,
