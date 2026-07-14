@@ -3,11 +3,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>我的旅遊行程規劃 V1.9.9</title>
+    <title>我的旅遊行程規劃 V1.10.0</title>
     <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
+        /* 隱形斗篷：在 Vue 載入完成前，隱藏帶有 v-cloak 的元素，防止漏出 {{ }} */
+        [v-cloak] { display: none; }
+        
         .column { min-width: 320px; max-width: 320px; height: calc(100vh - 180px); }
         .no-scrollbar::-webkit-scrollbar { display: none; }
         .img-preview { width: 100%; height: 200px; object-fit: contain; background: #0f172a; }
@@ -21,12 +24,14 @@
     <!--
     @Author:      cathy_liu 劉詩敏
     @Date:        2026-07-14
-    @Description: 旅遊行程管理工具 V1.9.9
-                  1. 選單選位優化：顯示實際的「欄位名稱(日期)」與「小卡標題」，取代原本的純數字索引，提升操作直覺性。
-                  2. 自動擴展選單寬度，並加入 truncate 避免過長名稱撐破版面。
+    @Description: 旅遊行程管理工具 V1.10.0 (穩定修復版)
+                  1. 修復 linkify 正規表達式斷行導致的 Syntax Error 崩潰問題。
+                  2. 加入 v-cloak 機制，防止頁面載入初期閃爍原始 Mustache 標籤。
+                  3. 保留 V1.9.9 的「名稱顯示選位」與全域點擊防呆等所有旗艦功能。
     -->
 
-    <div id="app" class="h-screen flex flex-col" @click="clearClipboard">
+    <!-- 加入 v-cloak 確保畫面載入完美 -->
+    <div id="app" class="h-screen flex flex-col" @click="clearClipboard" v-cloak>
         
         <!-- 🔍 圖片放大檢視 -->
         <div v-if="viewingImage" class="fixed inset-0 z-[100] flex items-center justify-center bg-black/90 p-4 animate-in fade-in duration-200" @click.stop="viewingImage = null">
@@ -117,17 +122,14 @@
                      draggable="true" @dragstart="handleDragStart('day', dIdx, null, $event)" @dragend="handleDragEnd($event)"
                      @dragover.prevent @dragenter.prevent @drop.stop="handleDrop('day', dIdx, null)">
                     
-                    <!-- 每日看板標題欄位 -->
                     <div class="p-4 flex justify-between items-center border-b border-slate-100/50 cursor-grab active:cursor-grabbing">
                         <div class="flex items-center">
                             <i class="fa-solid fa-grip-vertical text-slate-300 mr-2 hover:text-blue-500 transition"></i>
                             
-                            <!-- ⇆ 每日看板選單選位按鈕 -->
                             <div class="relative clickable-area mr-1">
                                 <button @click.stop="toggleDayMoveMenu(dIdx)" class="text-slate-400 hover:text-blue-600 transition w-5 h-5 flex items-center justify-center rounded hover:bg-slate-300/50" title="選單調整欄位位置">
                                     <i class="fa-solid fa-arrows-left-right text-xs"></i>
                                 </button>
-                                <!-- 看板選單下拉選單：加寬並顯示名稱 -->
                                 <div v-if="activeDayMoveIdx === dIdx" class="absolute top-7 left-0 bg-white border border-slate-200 rounded-xl shadow-xl p-2 z-30 w-56 space-y-1 font-sans">
                                     <div class="text-[10px] text-slate-400 font-bold px-2 pb-1 border-b">移動到指定欄位：</div>
                                     <button v-for="(dayItem, targetIdx) in currentTrip.days" :key="targetIdx"
@@ -148,7 +150,6 @@
                     <div class="flex-1 overflow-y-auto px-4 pb-4 space-y-4 pt-3 min-h-[150px]"
                          @dragover.prevent @dragenter.prevent @drop.stop="handleDrop('card', dIdx, null)">
                         
-                        <!-- 卡片渲染區 -->
                         <div v-for="(card, cIdx) in day.cards" :key="cIdx" 
                              class="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden group hover:shadow-md transition-shadow cursor-grab active:cursor-grabbing"
                              draggable="true" @dragstart.stop="handleDragStart('card', dIdx, cIdx, $event)" @dragend.stop="handleDragEnd($event)"
@@ -185,12 +186,10 @@
                                     <h3 class="font-bold text-slate-800 leading-tight flex-1 pr-2 pointer-events-none">{{ card.title }}</h3>
                                     <div class="flex gap-2 opacity-0 group-hover:opacity-100 transition clickable-area items-center">
                                         
-                                        <!-- ⇅ 行程小卡選單選位按鈕 -->
                                         <div class="relative">
                                             <button @click.stop="toggleCardMoveMenu(dIdx, cIdx)" class="text-slate-400 hover:text-indigo-600 transition w-5 h-5 flex items-center justify-center rounded hover:bg-slate-100" title="選單調整行程順序">
                                                 <i class="fa-solid fa-arrows-up-down text-xs"></i>
                                             </button>
-                                            <!-- 小卡選位下拉選單：加寬並顯示名稱 -->
                                             <div v-if="activeCardMovePos && activeCardMovePos.dIdx === dIdx && activeCardMovePos.cIdx === cIdx" 
                                                  class="absolute right-0 top-6 bg-white border border-slate-200 rounded-xl shadow-xl p-2 z-30 w-56 max-h-60 overflow-y-auto space-y-1 font-sans">
                                                 <div class="text-[10px] text-slate-400 font-bold px-2 pb-1 border-b text-left">移動到指定順序：</div>
@@ -359,7 +358,7 @@
 
         createApp({
             setup() {
-                const appVersion = ref('V1.9.9');
+                const appVersion = ref('V1.10.0');
                 const isLoggedIn = ref(false);
                 const loginPassword = ref('');
                 
@@ -510,10 +509,14 @@
                     } catch (e) { alert('連線失敗'); } finally { loading.value = false; }
                 };
 
+                // V1.10.0 修復重點：安全的字串換行處理
                 const linkify = (text) => {
                     if (!text) return '';
                     const urlRegex = /(https?:\/\/[^\s]+)/g;
-                    return text.replace(/</g, "<").replace(/>/g, ">").replace(urlRegex, (url) => `<a href="${url}" target="_blank" class="text-blue-500 font-bold underline" onclick="event.stopPropagation()">${url}</a>`).replace(/\n/g, '<br/>');
+                    // 先處理 XSS 防止標籤破壞，再處理網址，最後使用安全的 split.join 來處理換行
+                    let safeText = text.replace(/</g, "&lt;").replace(/>/g, "&gt;");
+                    safeText = safeText.replace(urlRegex, (url) => `<a href="${url}" target="_blank" class="text-blue-500 font-bold underline" onclick="event.stopPropagation()">${url}</a>`);
+                    return safeText.split('\n').join('<br/>');
                 };
 
                 const handleDragStart = (type, dIdx, cIdx, event) => {
