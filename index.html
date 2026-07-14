@@ -513,8 +513,7 @@
                 const linkify = (text) => {
                     if (!text) return '';
                     const urlRegex = /(https?:\/\/[^\s]+)/g;
-                    return text.replace(/</g, "<").replace(/>/g, ">").replace(urlRegex, (url) => `<a href="${url}" target="_blank" class="text-blue-500 font-bold underline" onclick="event.stopPropagation()">${url}</a>`).replace(/
-/g, '<br/>');
+                    return text.replace(/</g, "<").replace(/>/g, ">").replace(urlRegex, (url) => `<a href="${url}" target="_blank" class="text-blue-500 font-bold underline" onclick="event.stopPropagation()">${url}</a>`).replace(/\n/g, '<br/>');
                 };
 
                 const handleDragStart = (type, dIdx, cIdx, event) => {
