@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>我的旅遊行程規劃 V1.9.7</title>
+    <title>我的旅遊行程規劃 V1.9.8</title>
     <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
@@ -106,7 +106,25 @@
                      @dragover.prevent @dragenter.prevent @drop.stop="handleDrop('day', dIdx, null)">
                     
                     <div class="p-4 flex justify-between items-center border-b border-slate-100/50 cursor-grab active:cursor-grabbing">
-                        <i class="fa-solid fa-grip-vertical text-slate-300 mr-2 hover:text-blue-500 transition"></i>
+                        <div class="flex items-center">
+                            <i class="fa-solid fa-grip-vertical text-slate-300 mr-2 hover:text-blue-500 transition"></i>
+                            
+                            <div class="relative clickable-area mr-1">
+                                <button @click.stop="toggleDayMoveMenu(dIdx)" class="text-slate-400 hover:text-blue-600 transition w-5 h-5 flex items-center justify-center rounded hover:bg-slate-300/50" title="選單調整欄位位置">
+                                    <i class="fa-solid fa-arrows-left-right text-xs"></i>
+                                </button>
+                                <div v-if="activeDayMoveIdx === dIdx" class="absolute top-7 left-0 bg-white border border-slate-200 rounded-xl shadow-xl p-2 z-30 w-40 space-y-1 font-sans">
+                                    <div class="text-[10px] text-slate-400 font-bold px-2 pb-1 border-b">移動到指定欄位：</div>
+                                    <button v-for="(dayItem, targetIdx) in currentTrip.days" :key="targetIdx"
+                                            @click.stop="moveDayToPosition(dIdx, targetIdx)"
+                                            class="w-full text-left text-xs px-2 py-1.5 rounded-lg hover:bg-slate-100 transition text-slate-700 font-medium"
+                                            :class="{'bg-blue-50 text-blue-600 font-bold': dIdx === targetIdx}">
+                                        第 {{ targetIdx + 1 }} 欄 {{ dIdx === targetIdx ? '(目前)' : '' }}
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                        
                         <input v-model="day.date" @blur="saveToCloud" @click.stop class="bg-transparent font-black text-slate-700 w-full focus:outline-none text-lg">
                         <button @click.stop="removeDay(dIdx)" class="text-slate-400 hover:text-red-500 transition ml-2"><i class="fa-solid fa-trash-can text-sm"></i></button>
                     </div>
@@ -148,7 +166,24 @@
                                 
                                 <div class="flex justify-between items-start mb-2">
                                     <h3 class="font-bold text-slate-800 leading-tight flex-1 pr-2 pointer-events-none">{{ card.title }}</h3>
-                                    <div class="flex gap-2 opacity-0 group-hover:opacity-100 transition clickable-area">
+                                    <div class="flex gap-2 opacity-0 group-hover:opacity-100 transition clickable-area items-center">
+                                        
+                                        <div class="relative">
+                                            <button @click.stop="toggleCardMoveMenu(dIdx, cIdx)" class="text-slate-400 hover:text-indigo-600 transition w-5 h-5 flex items-center justify-center rounded hover:bg-slate-100" title="選單調整行程順序">
+                                                <i class="fa-solid fa-arrows-up-down text-xs"></i>
+                                            </button>
+                                            <div v-if="activeCardMovePos && activeCardMovePos.dIdx === dIdx && activeCardMovePos.cIdx === cIdx" 
+                                                 class="absolute right-0 top-6 bg-white border border-slate-200 rounded-xl shadow-xl p-2 z-30 w-36 max-h-48 overflow-y-auto space-y-1 font-sans">
+                                                <div class="text-[10px] text-slate-400 font-bold px-2 pb-1 border-b text-left">移動到指定順序：</div>
+                                                <button v-for="(cardItem, targetIdx) in day.cards" :key="targetIdx"
+                                                        @click.stop="moveCardToPosition(dIdx, cIdx, targetIdx)"
+                                                        class="w-full text-left text-xs px-2 py-1.5 rounded-lg hover:bg-slate-100 transition text-slate-700 font-medium"
+                                                        :class="{'bg-indigo-50 text-indigo-600 font-bold': cIdx === targetIdx}">
+                                                    第 {{ targetIdx + 1 }} 個位置 {{ cIdx === targetIdx ? '(目前)' : '' }}
+                                                </button>
+                                            </div>
+                                        </div>
+
                                         <button @click.stop="copyCard(card)" class="text-slate-400 hover:text-emerald-500" title="複製此行程"><i class="fa-regular fa-copy"></i></button>
                                         <button @click.stop="editCard(dIdx, cIdx)" class="text-slate-400 hover:text-blue-600"><i class="fa-solid fa-pen-to-square"></i></button>
                                         <button @click.stop="removeCard(dIdx, cIdx)" class="text-slate-400 hover:text-red-500"><i class="fa-solid fa-trash"></i></button>
@@ -303,7 +338,7 @@
 
         createApp({
             setup() {
-                const appVersion = ref('V1.9.7');
+                const appVersion = ref('V1.9.8');
                 const isLoggedIn = ref(false);
                 const loginPassword = ref('');
                 
@@ -316,11 +351,14 @@
                 const isEditing = ref(false);
                 const lastSyncTime = ref('--:--');
                 
-                // 圖片放大檢視與內文彈窗檢視
                 const viewingImage = ref(null);
                 const viewImage = (url) => { viewingImage.value = url; };
                 const viewingDescCard = ref(null);
                 const viewDesc = (card) => { viewingDescCard.value = card; };
+
+                // 控制分頁與小卡位移選單的狀態
+                const activeDayMoveIdx = ref(null);
+                const activeCardMovePos = ref(null); // 格式：{ dIdx, cIdx }
 
                 const tagColorMap = {
                     '機票': 'bg-sky-100 text-sky-700 border-sky-200',
@@ -334,7 +372,6 @@
                 };
                 
                 const defaultTags = ref(Object.keys(tagColorMap));
-                
                 const form = ref({ title: '', desc: '', images: [], coverIndex: 0, mapLink: '', mapName: '', url: '', urlName: '', checklist: [], tags: [] });
                 const tempImageUrl = ref(''); 
                 
@@ -377,9 +414,41 @@
                 };
 
                 const clearClipboard = () => {
-                    if (clipboardCard.value) {
-                        clipboardCard.value = null;
+                    if (clipboardCard.value) clipboardCard.value = null;
+                    activeDayMoveIdx.value = null;
+                    activeCardMovePos.value = null;
+                };
+
+                // --- 每日看板選單選位邏輯 ---
+                const toggleDayMoveMenu = (idx) => {
+                    activeDayMoveIdx.value = activeDayMoveIdx.value === idx ? null : idx;
+                    activeCardMovePos.value = null; // 互斥關閉
+                };
+
+                const moveDayToPosition = (sourceIdx, targetIdx) => {
+                    if (sourceIdx === targetIdx) return;
+                    const movedDay = currentTrip.value.days.splice(sourceIdx, 1)[0];
+                    currentTrip.value.days.splice(targetIdx, 0, movedDay);
+                    activeDayMoveIdx.value = null;
+                    saveToCloud();
+                };
+
+                // --- 行程小卡選單選位邏輯 ---
+                const toggleCardMoveMenu = (dIdx, cIdx) => {
+                    if (activeCardMovePos.value && activeCardMovePos.value.dIdx === dIdx && activeCardMovePos.value.cIdx === cIdx) {
+                        activeCardMovePos.value = null;
+                    } else {
+                        activeCardMovePos.value = { dIdx, cIdx };
+                        activeDayMoveIdx.value = null; // 互斥關閉
                     }
+                };
+
+                const moveCardToPosition = (dIdx, sourceIdx, targetIdx) => {
+                    if (sourceIdx === targetIdx) return;
+                    const movedCard = currentTrip.value.days[dIdx].cards.splice(sourceIdx, 1)[0];
+                    currentTrip.value.days[dIdx].cards.splice(targetIdx, 0, movedCard);
+                    activeCardMovePos.value = null;
+                    saveToCloud();
                 };
 
                 const editTripName = () => {
@@ -603,18 +672,22 @@
                         if (isLoggedIn.value) fetchFromCloud(); 
                     }, 40000);
 
-                    // 全域點擊監聽
+                    // 全域點擊監聽：點擊空白處自動取消複製，並收合所有移動選單
                     window.addEventListener('click', () => {
                         if (clipboardCard.value) clipboardCard.value = null;
+                        activeDayMoveIdx.value = null;
+                        activeCardMovePos.value = null;
                     });
 
-                    // 鍵盤監聽：按 ESC 鍵也能快速取消或關閉彈窗
+                    // 鍵盤監聽：按 ESC 鍵快速重置所有臨時 UI 狀態
                     window.addEventListener('keydown', (e) => {
                         if (e.key === 'Escape') {
                             clipboardCard.value = null;
                             viewingImage.value = null;
                             viewingDescCard.value = null;
                             showModal.value = false;
+                            activeDayMoveIdx.value = null;
+                            activeCardMovePos.value = null;
                         }
                     });
                 });
@@ -626,6 +699,8 @@
                     clipboardCard, copyCard, pasteCard, clearClipboard,
                     viewingImage, viewImage, viewingDescCard, viewDesc,
                     editTripName, deleteTrip,
+                    toggleDayMoveMenu, moveDayToPosition, activeDayMoveIdx, // 看板選位
+                    toggleCardMoveMenu, moveCardToPosition, activeCardMovePos, // 卡片選位
                     uploadToImgbb, addManualImage, removeImage, fetchFromCloud, saveToCloud, openCardModal, editCard, saveCard, removeCard, createNewTrip, addDay, removeDay, toggleTag, addNewTag, getDirectImageUrl, handleImageError,
                     handleDragStart, handleDragEnd, handleDrop,
                     handleTripDragStart, handleTripDragEnd, handleTripDrop
