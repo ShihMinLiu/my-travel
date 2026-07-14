@@ -3,14 +3,12 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>我的旅遊行程規劃 V1.10.0</title>
+    <title>我的旅遊行程規劃 V1.10.1</title>
     <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
-        /* 隱形斗篷：在 Vue 載入完成前，隱藏帶有 v-cloak 的元素，防止漏出 {{ }} */
         [v-cloak] { display: none; }
-        
         .column { min-width: 320px; max-width: 320px; height: calc(100vh - 180px); }
         .no-scrollbar::-webkit-scrollbar { display: none; }
         .img-preview { width: 100%; height: 200px; object-fit: contain; background: #0f172a; }
@@ -24,13 +22,12 @@
     <!--
     @Author:      cathy_liu 劉詩敏
     @Date:        2026-07-14
-    @Description: 旅遊行程管理工具 V1.10.0 (穩定修復版)
-                  1. 修復 linkify 正規表達式斷行導致的 Syntax Error 崩潰問題。
-                  2. 加入 v-cloak 機制，防止頁面載入初期閃爍原始 Mustache 標籤。
-                  3. 保留 V1.9.9 的「名稱顯示選位」與全域點擊防呆等所有旗艦功能。
+    @Description: 旅遊行程管理工具 V1.10.1 (懸浮彈窗選位版)
+                  1. 將「行程小卡順序調整」下拉選單升級為最上層的 Modal 彈窗。
+                  2. 徹底解決因為卡片 overflow-hidden 及欄位 overflow-y 導致選單被截斷的問題。
+                  3. 優化 UI，加大按鈕觸控範圍，加入目前位置醒目提示。
     -->
 
-    <!-- 加入 v-cloak 確保畫面載入完美 -->
     <div id="app" class="h-screen flex flex-col" @click="clearClipboard" v-cloak>
         
         <!-- 🔍 圖片放大檢視 -->
@@ -51,6 +48,32 @@
                 </div>
                 <div class="p-4 border-t border-slate-100 bg-slate-50">
                     <button @click="viewingDescCard = null" class="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl transition-all active:scale-95 shadow-md">關閉</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 🔄 行程小卡排序專屬彈窗 (解決截斷問題) -->
+        <div v-if="cardMoveModalPos" class="fixed inset-0 z-[120] flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-sm animate-in fade-in duration-200" @click.stop="cardMoveModalPos = null">
+            <div class="bg-white w-full max-w-sm rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-[80vh]" @click.stop>
+                <div class="p-4 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+                    <h3 class="font-black text-slate-800 text-lg flex-1 pr-2 truncate">
+                        <i class="fa-solid fa-arrows-up-down text-indigo-500 mr-2"></i>移動行程位置
+                    </h3>
+                    <button @click="cardMoveModalPos = null" class="text-slate-400 hover:text-red-500 transition w-8 h-8 flex items-center justify-center rounded-full hover:bg-red-50"><i class="fa-solid fa-xmark text-lg"></i></button>
+                </div>
+                <div class="p-4 overflow-y-auto flex-1 bg-slate-50/50">
+                    <div class="text-xs text-slate-500 mb-3 font-bold">請選擇「{{ currentTrip.days[cardMoveModalPos.dIdx].cards[cardMoveModalPos.cIdx].title || '未命名' }}」要移動到的順序：</div>
+                    <div class="space-y-2">
+                        <button v-for="(cardItem, targetIdx) in currentTrip.days[cardMoveModalPos.dIdx].cards" :key="targetIdx"
+                                @click.stop="moveCardToPosition(targetIdx)"
+                                class="w-full text-left px-4 py-3 rounded-xl border transition-all font-medium truncate flex items-center gap-3"
+                                :class="{'bg-indigo-50 border-indigo-200 text-indigo-700 shadow-sm': cardMoveModalPos.cIdx === targetIdx, 'bg-white border-slate-200 text-slate-700 hover:border-indigo-300 hover:shadow': cardMoveModalPos.cIdx !== targetIdx}"
+                                :title="cardItem.title">
+                            <span class="w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-black" :class="cardMoveModalPos.cIdx === targetIdx ? 'bg-indigo-200 text-indigo-800' : 'bg-slate-100 text-slate-500'">{{ targetIdx + 1 }}</span>
+                            <span class="truncate">{{ cardItem.title || '未命名' }}</span>
+                            <span v-if="cardMoveModalPos.cIdx === targetIdx" class="ml-auto text-[10px] font-bold bg-indigo-100 px-2 py-0.5 rounded text-indigo-600">目前位置</span>
+                        </button>
+                    </div>
                 </div>
             </div>
         </div>
@@ -122,14 +145,17 @@
                      draggable="true" @dragstart="handleDragStart('day', dIdx, null, $event)" @dragend="handleDragEnd($event)"
                      @dragover.prevent @dragenter.prevent @drop.stop="handleDrop('day', dIdx, null)">
                     
+                    <!-- 每日看板標題欄位 -->
                     <div class="p-4 flex justify-between items-center border-b border-slate-100/50 cursor-grab active:cursor-grabbing">
                         <div class="flex items-center">
                             <i class="fa-solid fa-grip-vertical text-slate-300 mr-2 hover:text-blue-500 transition"></i>
                             
+                            <!-- ⇆ 每日看板選單選位按鈕 -->
                             <div class="relative clickable-area mr-1">
                                 <button @click.stop="toggleDayMoveMenu(dIdx)" class="text-slate-400 hover:text-blue-600 transition w-5 h-5 flex items-center justify-center rounded hover:bg-slate-300/50" title="選單調整欄位位置">
                                     <i class="fa-solid fa-arrows-left-right text-xs"></i>
                                 </button>
+                                <!-- 看板選單下拉選單：加寬並顯示名稱 -->
                                 <div v-if="activeDayMoveIdx === dIdx" class="absolute top-7 left-0 bg-white border border-slate-200 rounded-xl shadow-xl p-2 z-30 w-56 space-y-1 font-sans">
                                     <div class="text-[10px] text-slate-400 font-bold px-2 pb-1 border-b">移動到指定欄位：</div>
                                     <button v-for="(dayItem, targetIdx) in currentTrip.days" :key="targetIdx"
@@ -150,6 +176,7 @@
                     <div class="flex-1 overflow-y-auto px-4 pb-4 space-y-4 pt-3 min-h-[150px]"
                          @dragover.prevent @dragenter.prevent @drop.stop="handleDrop('card', dIdx, null)">
                         
+                        <!-- 卡片渲染區 -->
                         <div v-for="(card, cIdx) in day.cards" :key="cIdx" 
                              class="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden group hover:shadow-md transition-shadow cursor-grab active:cursor-grabbing"
                              draggable="true" @dragstart.stop="handleDragStart('card', dIdx, cIdx, $event)" @dragend.stop="handleDragEnd($event)"
@@ -186,22 +213,10 @@
                                     <h3 class="font-bold text-slate-800 leading-tight flex-1 pr-2 pointer-events-none">{{ card.title }}</h3>
                                     <div class="flex gap-2 opacity-0 group-hover:opacity-100 transition clickable-area items-center">
                                         
-                                        <div class="relative">
-                                            <button @click.stop="toggleCardMoveMenu(dIdx, cIdx)" class="text-slate-400 hover:text-indigo-600 transition w-5 h-5 flex items-center justify-center rounded hover:bg-slate-100" title="選單調整行程順序">
-                                                <i class="fa-solid fa-arrows-up-down text-xs"></i>
-                                            </button>
-                                            <div v-if="activeCardMovePos && activeCardMovePos.dIdx === dIdx && activeCardMovePos.cIdx === cIdx" 
-                                                 class="absolute right-0 top-6 bg-white border border-slate-200 rounded-xl shadow-xl p-2 z-30 w-56 max-h-60 overflow-y-auto space-y-1 font-sans">
-                                                <div class="text-[10px] text-slate-400 font-bold px-2 pb-1 border-b text-left">移動到指定順序：</div>
-                                                <button v-for="(cardItem, targetIdx) in day.cards" :key="targetIdx"
-                                                        @click.stop="moveCardToPosition(dIdx, cIdx, targetIdx)"
-                                                        class="w-full text-left text-xs px-2 py-1.5 rounded-lg hover:bg-slate-100 transition text-slate-700 font-medium truncate"
-                                                        :class="{'bg-indigo-50 text-indigo-600 font-bold': cIdx === targetIdx}"
-                                                        :title="cardItem.title">
-                                                    {{ targetIdx + 1 }}. {{ cardItem.title || '未命名' }} {{ cIdx === targetIdx ? '(目前)' : '' }}
-                                                </button>
-                                            </div>
-                                        </div>
+                                        <!-- ⇅ 行程小卡觸發 Modal 選位按鈕 -->
+                                        <button @click.stop="openCardMoveModal(dIdx, cIdx)" class="text-slate-400 hover:text-indigo-600 transition w-5 h-5 flex items-center justify-center rounded hover:bg-slate-100" title="選單調整行程順序">
+                                            <i class="fa-solid fa-arrows-up-down text-xs"></i>
+                                        </button>
 
                                         <button @click.stop="copyCard(card)" class="text-slate-400 hover:text-emerald-500" title="複製此行程"><i class="fa-regular fa-copy"></i></button>
                                         <button @click.stop="editCard(dIdx, cIdx)" class="text-slate-400 hover:text-blue-600"><i class="fa-solid fa-pen-to-square"></i></button>
@@ -358,7 +373,7 @@
 
         createApp({
             setup() {
-                const appVersion = ref('V1.10.0');
+                const appVersion = ref('V1.10.1');
                 const isLoggedIn = ref(false);
                 const loginPassword = ref('');
                 
@@ -377,7 +392,9 @@
                 const viewDesc = (card) => { viewingDescCard.value = card; };
 
                 const activeDayMoveIdx = ref(null);
-                const activeCardMovePos = ref(null); 
+                
+                // 改用全域 Modal 儲存開啟位置
+                const cardMoveModalPos = ref(null); 
 
                 const tagColorMap = {
                     '機票': 'bg-sky-100 text-sky-700 border-sky-200',
@@ -435,12 +452,10 @@
                 const clearClipboard = () => {
                     if (clipboardCard.value) clipboardCard.value = null;
                     activeDayMoveIdx.value = null;
-                    activeCardMovePos.value = null;
                 };
 
                 const toggleDayMoveMenu = (idx) => {
                     activeDayMoveIdx.value = activeDayMoveIdx.value === idx ? null : idx;
-                    activeCardMovePos.value = null; 
                 };
 
                 const moveDayToPosition = (sourceIdx, targetIdx) => {
@@ -451,20 +466,22 @@
                     saveToCloud();
                 };
 
-                const toggleCardMoveMenu = (dIdx, cIdx) => {
-                    if (activeCardMovePos.value && activeCardMovePos.value.dIdx === dIdx && activeCardMovePos.value.cIdx === cIdx) {
-                        activeCardMovePos.value = null;
-                    } else {
-                        activeCardMovePos.value = { dIdx, cIdx };
-                        activeDayMoveIdx.value = null; 
-                    }
+                // 開啟卡片位移專屬彈窗
+                const openCardMoveModal = (dIdx, cIdx) => {
+                    cardMoveModalPos.value = { dIdx, cIdx };
+                    activeDayMoveIdx.value = null; 
                 };
 
-                const moveCardToPosition = (dIdx, sourceIdx, targetIdx) => {
-                    if (sourceIdx === targetIdx) return;
+                // 彈窗內的移動邏輯
+                const moveCardToPosition = (targetIdx) => {
+                    const { dIdx, cIdx: sourceIdx } = cardMoveModalPos.value;
+                    if (sourceIdx === targetIdx) {
+                        cardMoveModalPos.value = null;
+                        return;
+                    }
                     const movedCard = currentTrip.value.days[dIdx].cards.splice(sourceIdx, 1)[0];
                     currentTrip.value.days[dIdx].cards.splice(targetIdx, 0, movedCard);
-                    activeCardMovePos.value = null;
+                    cardMoveModalPos.value = null;
                     saveToCloud();
                 };
 
@@ -509,11 +526,9 @@
                     } catch (e) { alert('連線失敗'); } finally { loading.value = false; }
                 };
 
-                // V1.10.0 修復重點：安全的字串換行處理
                 const linkify = (text) => {
                     if (!text) return '';
                     const urlRegex = /(https?:\/\/[^\s]+)/g;
-                    // 先處理 XSS 防止標籤破壞，再處理網址，最後使用安全的 split.join 來處理換行
                     let safeText = text.replace(/</g, "&lt;").replace(/>/g, "&gt;");
                     safeText = safeText.replace(urlRegex, (url) => `<a href="${url}" target="_blank" class="text-blue-500 font-bold underline" onclick="event.stopPropagation()">${url}</a>`);
                     return safeText.split('\n').join('<br/>');
@@ -696,7 +711,6 @@
                     window.addEventListener('click', () => {
                         if (clipboardCard.value) clipboardCard.value = null;
                         activeDayMoveIdx.value = null;
-                        activeCardMovePos.value = null;
                     });
 
                     window.addEventListener('keydown', (e) => {
@@ -706,7 +720,7 @@
                             viewingDescCard.value = null;
                             showModal.value = false;
                             activeDayMoveIdx.value = null;
-                            activeCardMovePos.value = null;
+                            cardMoveModalPos.value = null;
                         }
                     });
                 });
@@ -719,7 +733,7 @@
                     viewingImage, viewImage, viewingDescCard, viewDesc,
                     editTripName, deleteTrip,
                     toggleDayMoveMenu, moveDayToPosition, activeDayMoveIdx,
-                    toggleCardMoveMenu, moveCardToPosition, activeCardMovePos,
+                    cardMoveModalPos, openCardMoveModal, moveCardToPosition, // 新增的彈窗選位狀態與方法
                     uploadToImgbb, addManualImage, removeImage, fetchFromCloud, saveToCloud, openCardModal, editCard, saveCard, removeCard, createNewTrip, addDay, removeDay, toggleTag, addNewTag, getDirectImageUrl, handleImageError,
                     handleDragStart, handleDragEnd, handleDrop,
                     handleTripDragStart, handleTripDragEnd, handleTripDrop
