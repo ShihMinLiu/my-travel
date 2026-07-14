@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>我的旅遊行程規劃 V1.10.1</title>
+    <title>我的旅遊行程規劃 V1.11.0</title>
     <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
@@ -22,10 +22,10 @@
     <!--
     @Author:      cathy_liu 劉詩敏
     @Date:        2026-07-14
-    @Description: 旅遊行程管理工具 V1.10.1 (懸浮彈窗選位版)
-                  1. 將「行程小卡順序調整」下拉選單升級為最上層的 Modal 彈窗。
-                  2. 徹底解決因為卡片 overflow-hidden 及欄位 overflow-y 導致選單被截斷的問題。
-                  3. 優化 UI，加大按鈕觸控範圍，加入目前位置醒目提示。
+    @Description: 旅遊行程管理工具 V1.11.0 (跨看板複製大師版)
+                  1. 解除分頁切換時清空剪貼簿的限制，完美實現小卡與整欄資料「跨看板複製貼上」。
+                  2. 新增「複製整欄 (Day)」的按鈕與專屬的巨型綠色貼上區塊 UI。
+    @Version:     V1.11.0
     -->
 
     <div id="app" class="h-screen flex flex-col" @click="clearClipboard" v-cloak>
@@ -52,7 +52,7 @@
             </div>
         </div>
 
-        <!-- 🔄 行程小卡排序專屬彈窗 (解決截斷問題) -->
+        <!-- 🔄 行程小卡排序專屬彈窗 -->
         <div v-if="cardMoveModalPos" class="fixed inset-0 z-[120] flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-sm animate-in fade-in duration-200" @click.stop="cardMoveModalPos = null">
             <div class="bg-white w-full max-w-sm rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-[80vh]" @click.stop>
                 <div class="p-4 border-b border-slate-100 flex justify-between items-center bg-slate-50">
@@ -124,7 +124,7 @@
                         @drop.stop="handleTripDrop(index)"
                         @dragover.prevent
                         @dragenter.prevent
-                        @click.stop="activeTripIndex = index; clearClipboard()"
+                        @click.stop="activeTripIndex = index"
                         :class="['px-4 py-1.5 rounded-full text-sm whitespace-nowrap transition-all flex items-center gap-2 cursor-grab active:cursor-grabbing', 
                                  activeTripIndex === index ? 'bg-white text-blue-900 font-bold shadow-md' : 'bg-white/10 text-blue-100 hover:bg-white/20']">
                         
@@ -155,7 +155,6 @@
                                 <button @click.stop="toggleDayMoveMenu(dIdx)" class="text-slate-400 hover:text-blue-600 transition w-5 h-5 flex items-center justify-center rounded hover:bg-slate-300/50" title="選單調整欄位位置">
                                     <i class="fa-solid fa-arrows-left-right text-xs"></i>
                                 </button>
-                                <!-- 看板選單下拉選單：加寬並顯示名稱 -->
                                 <div v-if="activeDayMoveIdx === dIdx" class="absolute top-7 left-0 bg-white border border-slate-200 rounded-xl shadow-xl p-2 z-30 w-56 space-y-1 font-sans">
                                     <div class="text-[10px] text-slate-400 font-bold px-2 pb-1 border-b">移動到指定欄位：</div>
                                     <button v-for="(dayItem, targetIdx) in currentTrip.days" :key="targetIdx"
@@ -169,8 +168,13 @@
                             </div>
                         </div>
                         
-                        <input v-model="day.date" @blur="saveToCloud" @click.stop class="bg-transparent font-black text-slate-700 w-full focus:outline-none text-lg">
-                        <button @click.stop="removeDay(dIdx)" class="text-slate-400 hover:text-red-500 transition ml-2"><i class="fa-solid fa-trash-can text-sm"></i></button>
+                        <input v-model="day.date" @blur="saveToCloud" @click.stop class="bg-transparent font-black text-slate-700 w-full focus:outline-none text-lg px-1">
+                        
+                        <!-- ★ 這裡新增了「複製整欄」的按鈕 ★ -->
+                        <div class="flex gap-2 items-center ml-2 clickable-area">
+                            <button @click.stop="copyDay(day)" class="text-slate-400 hover:text-emerald-500 transition" title="複製此欄 (可跨看板貼上)"><i class="fa-regular fa-copy text-sm"></i></button>
+                            <button @click.stop="removeDay(dIdx)" class="text-slate-400 hover:text-red-500 transition"><i class="fa-solid fa-trash-can text-sm"></i></button>
+                        </div>
                     </div>
 
                     <div class="flex-1 overflow-y-auto px-4 pb-4 space-y-4 pt-3 min-h-[150px]"
@@ -218,7 +222,7 @@
                                             <i class="fa-solid fa-arrows-up-down text-xs"></i>
                                         </button>
 
-                                        <button @click.stop="copyCard(card)" class="text-slate-400 hover:text-emerald-500" title="複製此行程"><i class="fa-regular fa-copy"></i></button>
+                                        <button @click.stop="copyCard(card)" class="text-slate-400 hover:text-emerald-500" title="複製此行程 (可跨看板貼上)"><i class="fa-regular fa-copy"></i></button>
                                         <button @click.stop="editCard(dIdx, cIdx)" class="text-slate-400 hover:text-blue-600"><i class="fa-solid fa-pen-to-square"></i></button>
                                         <button @click.stop="removeCard(dIdx, cIdx)" class="text-slate-400 hover:text-red-500"><i class="fa-solid fa-trash"></i></button>
                                     </div>
@@ -251,6 +255,7 @@
                             </div>
                         </div>
                         
+                        <!-- 貼上單張卡片按鈕 -->
                         <button v-if="clipboardCard" @click.stop="pasteCard(dIdx)" class="w-full py-2 bg-emerald-50 text-emerald-600 border-2 border-dashed border-emerald-200 rounded-xl hover:bg-emerald-100 font-bold transition-all shadow-sm mb-2 text-sm animate-in zoom-in duration-200">
                             <i class="fa-solid fa-paste mr-1"></i> 貼上「{{ clipboardCard.title }}」
                         </button>
@@ -261,6 +266,14 @@
                     </div>
                 </div>
                 
+                <!-- ★ 貼上整欄 (Day) 的大按鈕 ★ -->
+                <button v-if="clipboardDay" @click.stop="pasteDay()" class="column flex flex-col items-center justify-center bg-emerald-50/80 border-2 border-dashed border-emerald-300 rounded-3xl text-emerald-600 hover:bg-emerald-100 hover:border-emerald-400 transition-all font-bold shadow-sm h-[200px] animate-in zoom-in duration-200">
+                    <i class="fa-solid fa-paste text-3xl mb-2 drop-shadow-sm"></i>
+                    <span>貼上整欄資料</span>
+                    <span class="text-xs font-normal mt-1 truncate px-4 max-w-full">「{{ clipboardDay.date || '未命名' }}」</span>
+                </button>
+
+                <!-- 原本的新增區塊按鈕 -->
                 <button @click.stop="addDay" class="column flex flex-col items-center justify-center bg-white/40 border-2 border-dashed border-slate-200 rounded-3xl text-slate-400 hover:bg-white hover:text-blue-500 hover:border-blue-200 transition-all font-bold shadow-sm h-[200px]">
                     <i class="fa-solid fa-plus-circle text-2xl mb-1"></i>
                     <span>新增區塊</span>
@@ -373,7 +386,7 @@
 
         createApp({
             setup() {
-                const appVersion = ref('V1.10.1');
+                const appVersion = ref('V1.11.0');
                 const isLoggedIn = ref(false);
                 const loginPassword = ref('');
                 
@@ -392,8 +405,6 @@
                 const viewDesc = (card) => { viewingDescCard.value = card; };
 
                 const activeDayMoveIdx = ref(null);
-                
-                // 改用全域 Modal 儲存開啟位置
                 const cardMoveModalPos = ref(null); 
 
                 const tagColorMap = {
@@ -414,7 +425,10 @@
                 const editingPos = ref({ day: 0, card: 0 });
                 const dragInfo = ref({ type: null, dIdx: null, cIdx: null });
                 const dragTripIndex = ref(null);
+                
+                // ★ 剪貼簿系統擴充：同時支援小卡與整欄資料 ★
                 const clipboardCard = ref(null); 
+                const clipboardDay = ref(null);
 
                 const currentTrip = computed(() => trips.value[activeTripIndex.value] || trips.value[0]);
 
@@ -436,10 +450,19 @@
                     defaultTags.value = Array.from(usedTags);
                 };
 
+                // --- 複製小卡 ---
                 const copyCard = (cardData) => {
                     clipboardCard.value = JSON.parse(JSON.stringify(cardData));
+                    clipboardDay.value = null; // 複製小卡時，清空整欄的剪貼簿避免混淆
                 };
 
+                // --- 複製整欄 ---
+                const copyDay = (dayData) => {
+                    clipboardDay.value = JSON.parse(JSON.stringify(dayData));
+                    clipboardCard.value = null; // 複製整欄時，清空小卡的剪貼簿避免混淆
+                };
+
+                // --- 貼上小卡 ---
                 const pasteCard = (dayIdx) => {
                     if (clipboardCard.value) {
                         const newCard = JSON.parse(JSON.stringify(clipboardCard.value));
@@ -449,8 +472,20 @@
                     }
                 };
 
+                // --- 貼上整欄 ---
+                const pasteDay = () => {
+                    if (clipboardDay.value) {
+                        const newDay = JSON.parse(JSON.stringify(clipboardDay.value));
+                        currentTrip.value.days.push(newDay); // 預設貼在看板的最右邊
+                        saveToCloud();
+                        clipboardDay.value = null; 
+                    }
+                };
+
+                // --- 清空所有剪貼簿與臨時選單 ---
                 const clearClipboard = () => {
                     if (clipboardCard.value) clipboardCard.value = null;
+                    if (clipboardDay.value) clipboardDay.value = null;
                     activeDayMoveIdx.value = null;
                 };
 
@@ -466,13 +501,11 @@
                     saveToCloud();
                 };
 
-                // 開啟卡片位移專屬彈窗
                 const openCardMoveModal = (dIdx, cIdx) => {
                     cardMoveModalPos.value = { dIdx, cIdx };
                     activeDayMoveIdx.value = null; 
                 };
 
-                // 彈窗內的移動邏輯
                 const moveCardToPosition = (targetIdx) => {
                     const { dIdx, cIdx: sourceIdx } = cardMoveModalPos.value;
                     if (sourceIdx === targetIdx) {
@@ -708,14 +741,17 @@
                         if (isLoggedIn.value) fetchFromCloud(); 
                     }, 40000);
 
+                    // 點擊空白處清空剪貼簿，但「不會」因為點擊分頁按鈕而清空
                     window.addEventListener('click', () => {
                         if (clipboardCard.value) clipboardCard.value = null;
+                        if (clipboardDay.value) clipboardDay.value = null;
                         activeDayMoveIdx.value = null;
                     });
 
                     window.addEventListener('keydown', (e) => {
                         if (e.key === 'Escape') {
                             clipboardCard.value = null;
+                            clipboardDay.value = null;
                             viewingImage.value = null;
                             viewingDescCard.value = null;
                             showModal.value = false;
@@ -729,11 +765,13 @@
                     appVersion, isLoggedIn, loginPassword, handleLogin,
                     trips, activeTripIndex, currentTrip, loading, loadingMsg, uploadingImage, showModal, isEditing, form, tempImageUrl, lastSyncTime, defaultTags,
                     linkify, getTagColor,
-                    clipboardCard, copyCard, pasteCard, clearClipboard,
+                    clipboardCard, copyCard, pasteCard, 
+                    clipboardDay, copyDay, pasteDay, // 新增整欄複製貼上方法
+                    clearClipboard,
                     viewingImage, viewImage, viewingDescCard, viewDesc,
                     editTripName, deleteTrip,
                     toggleDayMoveMenu, moveDayToPosition, activeDayMoveIdx,
-                    cardMoveModalPos, openCardMoveModal, moveCardToPosition, // 新增的彈窗選位狀態與方法
+                    cardMoveModalPos, openCardMoveModal, moveCardToPosition, 
                     uploadToImgbb, addManualImage, removeImage, fetchFromCloud, saveToCloud, openCardModal, editCard, saveCard, removeCard, createNewTrip, addDay, removeDay, toggleTag, addNewTag, getDirectImageUrl, handleImageError,
                     handleDragStart, handleDragEnd, handleDrop,
                     handleTripDragStart, handleTripDragEnd, handleTripDrop
