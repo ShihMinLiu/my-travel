@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>我的旅遊行程規劃 V1.11.2</title>
+    <title>我的旅遊行程規劃 V1.11.3</title>
     <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
@@ -22,10 +22,10 @@
     <!--
     @Author:      cathy_liu 劉詩敏
     @Date:        2026-08-01
-    @Description: 旅遊行程管理工具 V1.11.2 (版面優化版)
-                  1. 修正長標題壓縮操作按鈕的問題。
-                  2. 將操作按鈕 (移動、複製、編輯、刪除) 移至上方 Tag 列的右側，釋放標題寬度。
-    @Version:     V1.11.2
+    @Description: 旅遊行程管理工具 V1.11.3 (視窗焦點同步版)
+                  1. 新增視窗焦點與可見度偵測 (visibilitychange & focus)。
+                  2. 切換回網頁時自動觸發強制同步，大幅降低多裝置同時編輯時的「全覆寫」衝突機率。
+    @Version:     V1.11.3
     -->
 
     <div id="app" class="h-screen flex flex-col" @click="clearClipboard" v-cloak>
@@ -203,7 +203,6 @@
                             </div>
                             
                             <div class="p-4">
-                                <!-- Tag 列與操作按鈕合併在同一列 -->
                                 <div class="flex justify-between items-start mb-2 min-h-[24px]">
                                     <div class="flex flex-wrap gap-1 pointer-events-none flex-1 mr-2">
                                         <span v-for="tag in card.tags" :key="tag" :class="['text-[9px] px-2 py-0.5 rounded font-bold uppercase', getTagColor(tag)]">
@@ -220,7 +219,6 @@
                                     </div>
                                 </div>
                                 
-                                <!-- 標題獨立一列，完整釋放寬度 -->
                                 <div class="mb-2">
                                     <h3 class="font-bold text-slate-800 leading-tight pointer-events-none break-words">{{ card.title }}</h3>
                                 </div>
@@ -380,7 +378,7 @@
 
         createApp({
             setup() {
-                const appVersion = ref('V1.11.2');
+                const appVersion = ref('V1.11.3');
                 const isLoggedIn = ref(false);
                 const loginPassword = ref('');
                 
@@ -640,6 +638,7 @@
                 const handleImageError = (e) => { e.target.style.display = 'none'; };
 
                 const fetchFromCloud = async () => {
+                    // 若正在載入、或是開啟編輯視窗中，則暫停背景同步，避免打斷編輯
                     if (loading.value || showModal.value || !isLoggedIn.value) return;
                     loading.value = true;
                     loadingMsg.value = '抓取中...';
@@ -731,9 +730,24 @@
                 };
 
                 onMounted(() => {
+                    // 基礎的 40 秒定期同步
                     setInterval(() => {
-                        if (isLoggedIn.value) fetchFromCloud(); 
+                        if (isLoggedIn.value && !showModal.value) fetchFromCloud(); 
                     }, 40000);
+
+                    // ★ 新增：當視窗重新獲得焦點或切換回此分頁時，立刻觸發積極同步 ★
+                    const aggressiveSync = () => {
+                        if (isLoggedIn.value && !showModal.value && !isEditing.value) {
+                            fetchFromCloud();
+                        }
+                    };
+
+                    window.addEventListener('focus', aggressiveSync);
+                    document.addEventListener('visibilitychange', () => {
+                        if (document.visibilityState === 'visible') {
+                            aggressiveSync();
+                        }
+                    });
 
                     window.addEventListener('click', () => {
                         if (clipboardCard.value) clipboardCard.value = null;
