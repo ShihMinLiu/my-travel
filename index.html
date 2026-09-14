@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>我的旅遊行程規劃 V1.11.3</title>
+    <title>我的旅遊行程規劃 V1.11.5</title>
     <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
@@ -21,11 +21,10 @@
 <body class="bg-slate-50 text-slate-900 font-sans">
     <!--
     @Author:      cathy_liu 劉詩敏
-    @Date:        2026-08-01
-    @Description: 旅遊行程管理工具 V1.11.3 (視窗焦點同步版)
-                  1. 新增視窗焦點與可見度偵測 (visibilitychange & focus)。
-                  2. 切換回網頁時自動觸發強制同步，大幅降低多裝置同時編輯時的「全覆寫」衝突機率。
-    @Version:     V1.11.3
+    @Date:        2026-09-15
+    @Description: 旅遊行程管理工具 V1.11.5 (全新對接版)
+                  1. 更新為全新的 Apps Script 部署網址，徹底解決舊版快取導致的密碼錯誤問題。
+    @Version:     V1.11.5
     -->
 
     <div id="app" class="h-screen flex flex-col" @click="clearClipboard" v-cloak>
@@ -372,13 +371,13 @@
 
     <script>
         const { createApp, ref, computed, onMounted } = Vue;
-        const CLOUD_API_URL = "https://script.google.com/macros/s/AKfycbytKIbMgC4nFyOlL9hbWcOClNr-BLWXXeY5UOaAV-cYmIrEQKWxOxGR1-tk_SAzvbjk/exec";
+        const CLOUD_API_URL = "https://script.google.com/macros/s/AKfycbxYOrfCAPlHLmDnvHTBLwqxFIvGtqCKL60ql9LKiyxd6rI33S8hsZKLPT_Wy-KovZDn/exec";
         const IMGBB_API_KEY = "4c98acba6c808fd9ac1815a2bd502e1f"; 
-        const SECRET_PASSWORD = "cathy2026"; 
+        const SECRET_PASSWORD = "724314"; 
 
         createApp({
             setup() {
-                const appVersion = ref('V1.11.3');
+                const appVersion = ref('V1.11.5');
                 const isLoggedIn = ref(false);
                 const loginPassword = ref('');
                 
@@ -638,7 +637,6 @@
                 const handleImageError = (e) => { e.target.style.display = 'none'; };
 
                 const fetchFromCloud = async () => {
-                    // 若正在載入、或是開啟編輯視窗中，則暫停背景同步，避免打斷編輯
                     if (loading.value || showModal.value || !isLoggedIn.value) return;
                     loading.value = true;
                     loadingMsg.value = '抓取中...';
@@ -730,12 +728,10 @@
                 };
 
                 onMounted(() => {
-                    // 基礎的 40 秒定期同步
                     setInterval(() => {
                         if (isLoggedIn.value && !showModal.value) fetchFromCloud(); 
                     }, 40000);
 
-                    // ★ 新增：當視窗重新獲得焦點或切換回此分頁時，立刻觸發積極同步 ★
                     const aggressiveSync = () => {
                         if (isLoggedIn.value && !showModal.value && !isEditing.value) {
                             fetchFromCloud();
