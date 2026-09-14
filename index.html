@@ -390,6 +390,28 @@
                 const showModal = ref(false);
                 const isEditing = ref(false);
                 const lastSyncTime = ref('--:--');
+                // Last acknowledged server state. Never write blind copies of the board.
+                const syncRevision = ref(null);
+                const baseTrips = ref([]);
+                let saveInProgress = false;
+                let saveQueued = false;
+                let hasUnsyncedChanges = false;
+                const cloneData = (value) => JSON.parse(JSON.stringify(value));
+                const newId = () => (crypto.randomUUID ? crypto.randomUUID() : `local-${Date.now()}-${Math.random()}`);
+                const ensureIds = () => trips.value.forEach(trip => {
+                    trip.id ||= newId();
+                    (trip.days || []).forEach(day => {
+                        day.id ||= newId();
+                        (day.cards || []).forEach(card => { card.id ||= newId(); });
+                    });
+                });
+                const acceptServerState = (state) => {
+                    trips.value = state.data || [];
+                    baseTrips.value = cloneData(trips.value);
+                    syncRevision.value = state.revision;
+                    hasUnsyncedChanges = false;
+                    extractTags();
+                };
                 
                 const viewingImage = ref(null);
                 const viewImage = (url) => { viewingImage.value = url; };
@@ -534,13 +556,10 @@
                     try {
                         const res = await fetch(`${CLOUD_API_URL}?pwd=${loginPassword.value}`);
                         const data = await res.json();
-                        if (data.error) { alert('密碼錯誤！'); loginPassword.value = ''; } 
+                        if (!data.ok) { alert('密碼錯誤！'); loginPassword.value = ''; } 
                         else { 
                             isLoggedIn.value = true; 
-                            if (Array.isArray(data) && data.length > 0) {
-                                trips.value = data;
-                                extractTags();
-                            }
+                            acceptServerState(data);
                         }
                     } catch (e) { alert('連線失敗'); } finally { loading.value = false; }
                 };
@@ -639,33 +658,45 @@
 
                 const fetchFromCloud = async () => {
                     // 若正在載入、或是開啟編輯視窗中，則暫停背景同步，避免打斷編輯
-                    if (loading.value || showModal.value || !isLoggedIn.value) return;
+                    if (loading.value || showModal.value || !isLoggedIn.value || hasUnsyncedChanges) return;
                     loading.value = true;
                     loadingMsg.value = '抓取中...';
                     try {
                         const res = await fetch(`${CLOUD_API_URL}?pwd=${loginPassword.value}`);
                         const data = await res.json();
-                        if (!data.error && Array.isArray(data)) {
-                            trips.value = data;
-                            extractTags(); 
-                        }
+                        if (data.ok) acceptServerState(data);
                         lastSyncTime.value = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
                     } catch (e) { console.error(e); } finally { loading.value = false; }
                 };
 
                 const saveToCloud = async () => {
-                    loading.value = true;
-                    loadingMsg.value = '切塊存檔中...';
+                    hasUnsyncedChanges = true;
+                    if (saveInProgress) { saveQueued = true; return; }
+                    saveInProgress = true;
                     try {
-                        await fetch(`${CLOUD_API_URL}?pwd=${loginPassword.value}`, { 
-                            method: "POST", mode: "no-cors", headers: {"Content-Type": "text/plain"},
-                            body: JSON.stringify(trips.value) 
-                        });
-                        setTimeout(() => { 
-                            loading.value = false; 
-                            lastSyncTime.value = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); 
-                        }, 1000);
-                    } catch (e) { loading.value = false; }
+                        do {
+                            saveQueued = false;
+                            ensureIds();
+                            const snapshot = cloneData(trips.value);
+                            loading.value = true;
+                            loadingMsg.value = '安全同步中...';
+                            const res = await fetch(`${CLOUD_API_URL}?pwd=${encodeURIComponent(loginPassword.value)}`, {
+                                method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+                                body: JSON.stringify({ baseRevision: syncRevision.value, baseData: baseTrips.value, data: snapshot })
+                            });
+                            const result = await res.json();
+                            if (result.conflict) {
+                                alert('同步衝突：另一位使用者也修改了相同內容。你的本機修改仍保留；請先複製重要文字，再重新整理並決定保留哪個版本。');
+                                saveQueued = false;
+                                break;
+                            }
+                            if (!result.ok) throw new Error(result.error || '儲存失敗');
+                            if (JSON.stringify(trips.value) === JSON.stringify(snapshot)) acceptServerState(result);
+                            else { baseTrips.value = cloneData(result.data); syncRevision.value = result.revision; }
+                            lastSyncTime.value = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                        } while (saveQueued);
+                    } catch (e) { alert(`同步失敗：${e.message || e}`); }
+                    finally { saveInProgress = false; loading.value = false; loadingMsg.value = '同步中...'; }
                 };
 
                 const openCardModal = (dayIdx) => {
