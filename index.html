@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>我的旅遊行程規劃 V1.12.1</title>
+    <title>我的旅遊行程規劃 V1.11.3</title>
     <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
@@ -21,28 +21,11 @@
 <body class="bg-slate-50 text-slate-900 font-sans">
     <!--
     @Author:      cathy_liu 劉詩敏
-    @Date:        2026-09-13
-    @Description: 旅遊行程管理工具 V1.12.1 (多人協作合併同步版・修補舊資料遷移風險)
-                  1. 修正多人同時編輯時資料互相蓋掉的問題（Lost Update）：
-                     為每個行程/天/卡片加上唯一 id 與 updatedAt 時間戳記。
-                  2. saveToCloud / fetchFromCloud 改為「三方合併 (3-way merge)」，
-                     存檔前會先抓雲端最新版，用 base(上次同步版)／local(本機)／remote(雲端)
-                     三份資料比對，新增/刪除以 id 是否存在判斷，同一筆資料被兩邊都改到
-                     時才用 updatedAt 較新的一方為準，不再整包互相覆蓋。
-                  3. 新增 isSyncing 鎖，避免同一時間重複觸發同步造成競爭寫入。
-                  4. 舊資料（沒有 id/updatedAt 欄位）會在讀取時自動補齊，向下相容。
-                  5. 背景輪詢間隔由 40 秒縮短為 25 秒，降低衝突視窗。
-                  6. 保留 V1.11.3 的視窗焦點/可見度偵測強制同步機制。
-                  7.【V1.12.1 修補】舊格式資料（無 id）登入時偵測到就立刻把補好 id 的
-                     版本寫回雲端，避免過渡期間每次重新抓取都各自產生不同的隨機 id，
-                     導致三方合併誤判成「舊資料被刪除、新增了內容一樣的新資料」而
-                     把過渡期剛做的編輯洗掉。
-                  已知限制：若兩人在「同一瞬間」對同一份清單做純粹拖曳排序（沒有新增/
-                  刪除/修改內容），目前以雲端當時順序為主、本機新增項目補在最後，
-                  排序本身不做合併。若需要完全即時、零衝突的協作，建議未來把後端從
-                  Google Apps Script 整包 JSON 儲存，換成 Firebase Firestore 之類支援
-                  單筆寫入的資料庫。
-    @Version:     V1.12.1
+    @Date:        2026-08-01
+    @Description: 旅遊行程管理工具 V1.11.3 (視窗焦點同步版)
+                  1. 新增視窗焦點與可見度偵測 (visibilitychange & focus)。
+                  2. 切換回網頁時自動觸發強制同步，大幅降低多裝置同時編輯時的「全覆寫」衝突機率。
+    @Version:     V1.11.3
     -->
 
     <div id="app" class="h-screen flex flex-col" @click="clearClipboard" v-cloak>
@@ -183,7 +166,7 @@
                             </div>
                         </div>
                         
-                        <input v-model="day.date" @blur="() => { touch(day); saveToCloud(); }" @click.stop class="bg-transparent font-black text-slate-700 w-full focus:outline-none text-lg px-1">
+                        <input v-model="day.date" @blur="saveToCloud" @click.stop class="bg-transparent font-black text-slate-700 w-full focus:outline-none text-lg px-1">
                         
                         <div class="flex gap-2 items-center ml-2 clickable-area">
                             <button @click.stop="copyDay(day)" class="text-slate-400 hover:text-emerald-500 transition" title="複製此欄 (可跨看板貼上)"><i class="fa-regular fa-copy text-sm"></i></button>
@@ -251,7 +234,7 @@
 
                                 <div v-if="card.checklist && card.checklist.length" class="mb-3 space-y-1 bg-slate-50 p-2 rounded-xl border border-slate-100 clickable-area">
                                     <div v-for="(item, iIdx) in card.checklist" :key="iIdx" class="flex items-center gap-2 text-[10px]">
-                                        <input type="checkbox" v-model="item.done" @change="() => { touch(card); saveToCloud(); }" @click.stop class="rounded h-3 w-3 text-blue-600 border-slate-300">
+                                        <input type="checkbox" v-model="item.done" @change="saveToCloud" @click.stop class="rounded h-3 w-3 text-blue-600 border-slate-300">
                                         <span :class="{'line-through text-slate-400': item.done}" class="text-slate-600 truncate">{{ item.text }}</span>
                                     </div>
                                 </div>
@@ -393,115 +376,13 @@
         const IMGBB_API_KEY = "4c98acba6c808fd9ac1815a2bd502e1f"; 
         const SECRET_PASSWORD = "cathy2026"; 
 
-        /*
-        @Author:      cathy_liu 劉詩敏
-        @Date:        2026-09-13
-        @Description: 多人協作三方合併 (3-way merge) 工具函式集 V1.12.0
-                      解決「兩人同時編輯，整包覆寫互相蓋掉資料」的問題。
-                      核心概念：
-                      1. 每筆 trip / day / card 都有唯一 id，合併時用 id 比對「是不是同一筆」。
-                      2. 每筆資料都有 updatedAt，兩邊都改到同一筆時，用時間較新的整筆蓋過去。
-                      3. base = 上一次「已知與雲端一致」的快照，用來分辨
-                         「這是新增的」還是「對方剛刪除的」。
-        @Version:     V1.12.0
-        */
-
-        // 產生一個帶時間戳記的隨機唯一 id，不需要額外套件
-        const genId = () => 'id_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8);
-
-        // 深拷貝小工具（沿用專案原本就在用的 JSON.parse(JSON.stringify()) 手法）
-        const cloneDeep = (obj) => JSON.parse(JSON.stringify(obj));
-
-        // 標記一筆資料「剛剛被修改過」，合併時用來判斷誰的版本比較新
-        const touch = (obj) => { if (obj) obj.updatedAt = Date.now(); };
-
-        // 舊資料可能沒有 id / updatedAt（V1.11.3 以前建立的行程），讀取時自動補齊，向下相容
-        const normalizeData = (data) => {
-            if (!Array.isArray(data)) return data;
-            data.forEach(trip => {
-                if (!trip.id) trip.id = genId();
-                if (!trip.updatedAt) trip.updatedAt = Date.now();
-                (trip.days || []).forEach(day => {
-                    if (!day.id) day.id = genId();
-                    if (!day.updatedAt) day.updatedAt = Date.now();
-                    (day.cards || []).forEach(card => {
-                        if (!card.id) card.id = genId();
-                        if (!card.updatedAt) card.updatedAt = Date.now();
-                    });
-                });
-            });
-            return data;
-        };
-
-        // 三方合併陣列核心邏輯：依 id 比對 base(合併基準) / local(本機) / remote(雲端最新)
-        // mergeItem(baseItem, localItem, remoteItem)：同一個 id 兩邊都有時，如何合併其內容；
-        // 省略時預設整筆用 updatedAt 較新的一方蓋過去
-        const mergeArraysById = (baseArr, localArr, remoteArr, mergeItem) => {
-            baseArr = baseArr || []; localArr = localArr || []; remoteArr = remoteArr || [];
-            const baseIds = new Set(baseArr.map(i => i.id));
-            const localMap = new Map(localArr.map(i => [i.id, i]));
-            const remoteMap = new Map(remoteArr.map(i => [i.id, i]));
-
-            // 排列順序：以雲端目前的順序為主，本機新增的項目補在最後面
-            const order = [];
-            remoteArr.forEach(i => { if (!order.includes(i.id)) order.push(i.id); });
-            localArr.forEach(i => { if (!order.includes(i.id)) order.push(i.id); });
-
-            const result = [];
-            order.forEach(id => {
-                const inLocal = localMap.has(id);
-                const inRemote = remoteMap.has(id);
-                const inBase = baseIds.has(id);
-
-                if (inLocal && inRemote) {
-                    // 兩邊都存在：可能雙方或其中一方有修改，交給 mergeItem 判斷內容
-                    const baseItem = inBase ? baseArr.find(i => i.id === id) : null;
-                    if (mergeItem) {
-                        result.push(mergeItem(baseItem, localMap.get(id), remoteMap.get(id)));
-                    } else {
-                        const l = localMap.get(id), r = remoteMap.get(id);
-                        result.push((l.updatedAt || 0) >= (r.updatedAt || 0) ? l : r);
-                    }
-                } else if (inLocal && !inRemote) {
-                    // 只有本機有：base 也有 → 對方剛刪除了它，尊重刪除；base 沒有 → 是本機新增的，保留
-                    if (!inBase) result.push(localMap.get(id));
-                } else if (!inLocal && inRemote) {
-                    // 只有雲端有：base 也有 → 是我方剛刪除的，尊重刪除；base 沒有 → 對方新增的，保留
-                    if (!inBase) result.push(remoteMap.get(id));
-                }
-            });
-            return result;
-        };
-
-        // 卡片層級：兩邊都改到同一張卡片時，整張卡片用 updatedAt 較新的一方為準
-        const mergeCardLevel = (base, local, remote) => (local.updatedAt || 0) >= (remote.updatedAt || 0) ? local : remote;
-
-        // 天(欄位)層級：欄位本身欄位(標題等)用較新的一方，裡面的卡片再往下一層合併
-        const mergeDayLevel = (base, local, remote) => {
-            const winner = (local.updatedAt || 0) >= (remote.updatedAt || 0) ? local : remote;
-            const mergedCards = mergeArraysById(base ? base.cards : [], local.cards, remote.cards, mergeCardLevel);
-            return { ...winner, cards: mergedCards };
-        };
-
-        // 行程層級：行程本身欄位(名稱等)用較新的一方，裡面的天再往下一層合併
-        const mergeTripLevel = (base, local, remote) => {
-            const winner = (local.updatedAt || 0) >= (remote.updatedAt || 0) ? local : remote;
-            const mergedDays = mergeArraysById(base ? base.days : [], local.days, remote.days, mergeDayLevel);
-            return { ...winner, days: mergedDays };
-        };
-
-        // 對外主要入口：合併整份「行程列表」(trips 陣列)
-        const mergeTrips = (baseTrips, localTrips, remoteTrips) => {
-            return mergeArraysById(baseTrips, localTrips, remoteTrips, mergeTripLevel);
-        };
-
         createApp({
             setup() {
-                const appVersion = ref('V1.12.1');
+                const appVersion = ref('V1.11.3');
                 const isLoggedIn = ref(false);
                 const loginPassword = ref('');
                 
-                const trips = ref(normalizeData([{ id: genId(), updatedAt: Date.now(), name: '新增旅程', days: [{ id: genId(), updatedAt: Date.now(), date: 'Day 1', cards: [] }] }]));
+                const trips = ref([{ name: '新增旅程', days: [{ date: 'Day 1', cards: [] }] }]);
                 const activeTripIndex = ref(0);
                 const loading = ref(false);
                 const uploadingImage = ref(false);
@@ -509,10 +390,6 @@
                 const showModal = ref(false);
                 const isEditing = ref(false);
                 const lastSyncTime = ref('--:--');
-                // isSyncing：同步進行中的鎖，避免同一時間重複觸發合併/存檔造成競爭寫入
-                const isSyncing = ref(false);
-                // lastCloudSnapshot：上一次「已知與雲端一致」的資料快照，做為三方合併的比對基準(base)
-                const lastCloudSnapshot = ref([]);
                 
                 const viewingImage = ref(null);
                 const viewImage = (url) => { viewingImage.value = url; };
@@ -577,9 +454,6 @@
                 const pasteCard = (dayIdx) => {
                     if (clipboardCard.value) {
                         const newCard = JSON.parse(JSON.stringify(clipboardCard.value));
-                        // 貼上會產生「新的一筆」，必須給全新 id，否則合併時會被誤判成同一張卡片
-                        newCard.id = genId();
-                        newCard.updatedAt = Date.now();
                         currentTrip.value.days[dayIdx].cards.push(newCard);
                         saveToCloud();
                         clipboardCard.value = null; 
@@ -589,10 +463,6 @@
                 const pasteDay = () => {
                     if (clipboardDay.value) {
                         const newDay = JSON.parse(JSON.stringify(clipboardDay.value));
-                        // 整欄貼上：這個欄位本身、以及裡面每一張卡片都要換成全新 id
-                        newDay.id = genId();
-                        newDay.updatedAt = Date.now();
-                        newDay.cards = (newDay.cards || []).map(c => ({ ...c, id: genId(), updatedAt: Date.now() }));
                         currentTrip.value.days.push(newDay); 
                         saveToCloud();
                         clipboardDay.value = null; 
@@ -638,7 +508,6 @@
                     const newName = prompt('請輸入新的行程名稱：', currentTrip.value.name);
                     if (newName && newName.trim() !== '') {
                         currentTrip.value.name = newName.trim();
-                        touch(currentTrip.value);
                         saveToCloud();
                     }
                 };
@@ -659,29 +528,6 @@
                     }
                 };
 
-                /*
-                @Author:      cathy_liu 劉詩敏
-                @Date:        2026-09-13
-                @Description: handleLogin V1.12.1（修補舊資料 id 遷移風險）
-                              問題：V1.12.0 以前建立的舊資料沒有 id/updatedAt，
-                              normalizeData() 每次遇到缺 id 的資料都會「隨機」補一個新 id。
-                              如果登入時補了一組 id，但雲端還沒被寫回過，下一次背景抓取／
-                              存檔又對「同一份雲端舊資料」重新 normalize 一次，就會產生
-                              「另一組不同的隨機 id」，導致三方合併誤判成「舊資料被刪除、
-                              新增了內容一樣的新資料」，把過渡期間剛做的編輯洗掉。
-                              修法：偵測到資料是舊格式時，登入當下就立刻把補好 id 的版本
-                              寫回雲端一次，之後每次抓取看到的都是「同一組 id」，徹底避免
-                              這個過渡期的競爭風險。
-                @Version:     V1.12.1
-                */
-                // 檢查抓回來的原始資料是不是 V1.12.0 之前的舊格式（缺少 id）
-                const needsIdMigration = (rawTrips) => {
-                    if (!Array.isArray(rawTrips)) return false;
-                    return rawTrips.some(trip => !trip.id ||
-                        (trip.days || []).some(day => !day.id ||
-                            (day.cards || []).some(card => !card.id)));
-                };
-
                 const handleLogin = async () => {
                     if (!loginPassword.value) return alert('請輸入密碼');
                     loading.value = true;
@@ -692,25 +538,8 @@
                         else { 
                             isLoggedIn.value = true; 
                             if (Array.isArray(data) && data.length > 0) {
-                                const migrationNeeded = needsIdMigration(data);
-                                trips.value = normalizeData(data);
+                                trips.value = data;
                                 extractTags();
-                                // 記錄登入當下的狀態，做為之後三方合併的初始基準
-                                lastCloudSnapshot.value = cloneDeep(trips.value);
-
-                                if (migrationNeeded) {
-                                    // 舊格式資料：立刻把補好 id 的版本寫回雲端，避免之後
-                                    // 每次重新抓取都各自產生不同的隨機 id 造成誤判刪除
-                                    try {
-                                        await fetch(`${CLOUD_API_URL}?pwd=${loginPassword.value}`, {
-                                            method: "POST", mode: "no-cors", headers: {"Content-Type": "text/plain"},
-                                            body: JSON.stringify(trips.value)
-                                        });
-                                    } catch (migrateErr) { console.error('舊資料 id 補齊回寫失敗：', migrateErr); }
-                                }
-                            } else {
-                                trips.value = normalizeData(trips.value);
-                                lastCloudSnapshot.value = cloneDeep(trips.value);
                             }
                         }
                     } catch (e) { alert('連線失敗'); } finally { loading.value = false; }
@@ -808,92 +637,35 @@
                 };
                 const handleImageError = (e) => { e.target.style.display = 'none'; };
 
-                /*
-                @Author:      cathy_liu 劉詩敏
-                @Date:        2026-09-13
-                @Description: fetchFromCloud V1.12.0
-                              背景/手動抓取雲端資料時，不再直接整包覆蓋本機，而是用
-                              base(上次同步基準)／local(本機目前)／remote(雲端最新)
-                              做三方合併，避免蓋掉本機尚未來得及送出的修改。
-                              若合併後結果跟雲端原始資料不同（代表本機有新東西），
-                              會自動補寫回雲端，讓雲端保持最新的合併結果。
-                @Version:     V1.12.0
-                */
                 const fetchFromCloud = async () => {
-                    // 若正在載入、同步中、或是開啟編輯視窗中，則暫停背景同步，避免打斷編輯或造成競爭寫入
-                    if (loading.value || showModal.value || isSyncing.value || !isLoggedIn.value) return;
-                    isSyncing.value = true;
+                    // 若正在載入、或是開啟編輯視窗中，則暫停背景同步，避免打斷編輯
+                    if (loading.value || showModal.value || !isLoggedIn.value) return;
                     loading.value = true;
                     loadingMsg.value = '抓取中...';
                     try {
                         const res = await fetch(`${CLOUD_API_URL}?pwd=${loginPassword.value}`);
                         const data = await res.json();
                         if (!data.error && Array.isArray(data)) {
-                            const remoteTrips = normalizeData(data);
-                            const merged = mergeTrips(lastCloudSnapshot.value, trips.value, remoteTrips);
-                            trips.value = merged;
-                            extractTags();
-
-                            // 合併後跟雲端原始資料不一樣，代表本機有雲端還不知道的修改，補寫回去
-                            if (JSON.stringify(merged) !== JSON.stringify(remoteTrips)) {
-                                await fetch(`${CLOUD_API_URL}?pwd=${loginPassword.value}`, {
-                                    method: "POST", mode: "no-cors", headers: {"Content-Type": "text/plain"},
-                                    body: JSON.stringify(merged)
-                                });
-                                lastCloudSnapshot.value = cloneDeep(merged);
-                            } else {
-                                lastCloudSnapshot.value = cloneDeep(remoteTrips);
-                            }
+                            trips.value = data;
+                            extractTags(); 
                         }
                         lastSyncTime.value = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-                    } catch (e) { console.error(e); } finally { loading.value = false; isSyncing.value = false; }
+                    } catch (e) { console.error(e); } finally { loading.value = false; }
                 };
 
-                /*
-                @Author:      cathy_liu 劉詩敏
-                @Date:        2026-09-13
-                @Description: saveToCloud V1.12.0
-                              存檔前先抓一次雲端最新資料，確認同一時間有沒有其他人已經
-                              送出變更，再用三方合併算出最終結果後才寫回雲端，
-                              取代原本「直接整包覆蓋」的做法，避免互相蓋掉對方的修改。
-                @Version:     V1.12.0
-                */
                 const saveToCloud = async () => {
-                    // 已經在同步中就先跳過這一次，避免同時間重複送出造成競爭寫入；
-                    // 呼叫端的資料變動仍留在 trips.value 上，下一次操作觸發存檔時會一併存到
-                    if (isSyncing.value) return;
-                    isSyncing.value = true;
                     loading.value = true;
-                    loadingMsg.value = '同步比對中...';
+                    loadingMsg.value = '切塊存檔中...';
                     try {
-                        // Step 1：存檔前先抓一次雲端最新資料
-                        const res = await fetch(`${CLOUD_API_URL}?pwd=${loginPassword.value}`);
-                        const remoteData = await res.json();
-                        const remoteTrips = (!remoteData.error && Array.isArray(remoteData))
-                            ? normalizeData(remoteData)
-                            : lastCloudSnapshot.value;
-
-                        // Step 2：以上次同步基準(base)為準，合併本機修改(local)與雲端最新(remote)
-                        const merged = mergeTrips(lastCloudSnapshot.value, trips.value, remoteTrips);
-                        trips.value = merged;
-                        extractTags();
-
-                        // Step 3：把合併後的最終結果寫回雲端
-                        loadingMsg.value = '寫入雲端中...';
                         await fetch(`${CLOUD_API_URL}?pwd=${loginPassword.value}`, { 
                             method: "POST", mode: "no-cors", headers: {"Content-Type": "text/plain"},
-                            body: JSON.stringify(merged) 
+                            body: JSON.stringify(trips.value) 
                         });
-
-                        // Step 4：更新合併基準快照，做為下一次三方合併的 base
-                        lastCloudSnapshot.value = cloneDeep(merged);
-                        lastSyncTime.value = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-                    } catch (e) {
-                        console.error('存檔合併失敗：', e);
-                    } finally {
-                        loading.value = false;
-                        isSyncing.value = false;
-                    }
+                        setTimeout(() => { 
+                            loading.value = false; 
+                            lastSyncTime.value = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); 
+                        }, 1000);
+                    } catch (e) { loading.value = false; }
                 };
 
                 const openCardModal = (dayIdx) => {
@@ -924,15 +696,8 @@
 
                 const saveCard = () => {
                     if (!form.value.title) return alert('請輸入標題');
-                    const cardData = JSON.parse(JSON.stringify(form.value));
-                    cardData.updatedAt = Date.now();
-                    if (isEditing.value) {
-                        if (!cardData.id) cardData.id = genId(); // 保護：舊資料萬一沒有 id 時補上
-                        currentTrip.value.days[editingPos.value.day].cards[editingPos.value.card] = cardData;
-                    } else {
-                        cardData.id = genId();
-                        currentTrip.value.days[editingPos.value.day].cards.push(cardData);
-                    }
+                    if (isEditing.value) currentTrip.value.days[editingPos.value.day].cards[editingPos.value.card] = JSON.parse(JSON.stringify(form.value));
+                    else currentTrip.value.days[editingPos.value.day].cards.push(JSON.parse(JSON.stringify(form.value)));
                     
                     extractTags(); 
                     showModal.value = false;
@@ -945,10 +710,10 @@
                     }
                 };
 
-                const removeCard = (d, c) => { if(confirm('確定刪除？')) { touch(currentTrip.value.days[d]); currentTrip.value.days[d].cards.splice(c, 1); saveToCloud(); }};
-                const createNewTrip = () => { const n = prompt('行程名稱？'); if(n){ trips.value.push({id: genId(), updatedAt: Date.now(), name:n, days:[{id: genId(), updatedAt: Date.now(), date:'Day 1', cards:[]}]}); saveToCloud(); }};
-                const addDay = () => { touch(currentTrip.value); currentTrip.value.days.push({id: genId(), updatedAt: Date.now(), date:'新欄位', cards:[]}); saveToCloud(); };
-                const removeDay = (idx) => { if(confirm('刪除整欄？')) { touch(currentTrip.value); currentTrip.value.days.splice(idx,1); saveToCloud(); }};
+                const removeCard = (d, c) => { if(confirm('確定刪除？')) { currentTrip.value.days[d].cards.splice(c, 1); saveToCloud(); }};
+                const createNewTrip = () => { const n = prompt('行程名稱？'); if(n){ trips.value.push({name:n, days:[{date:'Day 1', cards:[]}]}); saveToCloud(); }};
+                const addDay = () => { currentTrip.value.days.push({date:'新欄位', cards:[]}); saveToCloud(); };
+                const removeDay = (idx) => { if(confirm('刪除整欄？')) { currentTrip.value.days.splice(idx,1); saveToCloud(); }};
 
                 const toggleTag = (tag) => {
                     if (!form.value.tags) form.value.tags = [];
@@ -965,10 +730,10 @@
                 };
 
                 onMounted(() => {
-                    // 基礎的 25 秒定期同步（V1.12.0 由 40 秒縮短，搭配三方合併降低多人衝突視窗）
+                    // 基礎的 40 秒定期同步
                     setInterval(() => {
                         if (isLoggedIn.value && !showModal.value) fetchFromCloud(); 
-                    }, 25000);
+                    }, 40000);
 
                     // ★ 新增：當視窗重新獲得焦點或切換回此分頁時，立刻觸發積極同步 ★
                     const aggressiveSync = () => {
