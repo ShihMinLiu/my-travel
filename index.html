@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>我的旅遊行程規劃 V1.14.0</title>
+    <title>我的旅遊行程規劃 V1.15.0</title>
     <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- 引入 SheetJS 用於匯出 Excel -->
@@ -24,16 +24,32 @@
     <!--
     @Author:      cathy_liu 劉詩敏
     @Date:        2026-09-15
-    @Description: 旅遊行程管理工具 V1.14.0 (新增一鍵匯出 Excel 功能)
-    @Version:     V1.14.0
+    @Description: 旅遊行程管理工具 V1.15.0 (新增多圖片預覽與左右切換功能)
+    @Version:     V1.15.0
     -->
 
     <div id="app" class="h-screen flex flex-col" @click="clearClipboard" v-cloak>
         
-        <!-- 🔍 圖片放大檢視 -->
-        <div v-if="viewingImage" class="fixed inset-0 z-[100] flex items-center justify-center bg-black/90 p-4 animate-in fade-in duration-200" @click.stop="viewingImage = null">
-            <button class="absolute top-4 right-4 text-white hover:text-red-500 text-3xl transition"><i class="fa-solid fa-xmark"></i></button>
-            <img :src="viewingImage" class="max-w-full max-h-full object-contain rounded-lg shadow-2xl" @click.stop>
+        <!-- 🔍 圖片放大檢視 (支援多圖輪播) -->
+        <div v-if="viewingImages.length > 0" class="fixed inset-0 z-[100] flex items-center justify-center bg-black/95 p-4 animate-in fade-in duration-200" @click.stop="closeImageViewer">
+            <button class="absolute top-4 right-4 text-white hover:text-red-500 text-4xl transition z-[101]"><i class="fa-solid fa-xmark"></i></button>
+            
+            <!-- 左切換按鈕 -->
+            <button v-if="viewingImages.length > 1" @click.stop="prevImage" class="absolute left-2 md:left-8 top-1/2 -translate-y-1/2 text-white/40 hover:text-white text-5xl transition p-4 z-[101]">
+                <i class="fa-solid fa-chevron-left"></i>
+            </button>
+            
+            <!-- 右切換按鈕 -->
+            <button v-if="viewingImages.length > 1" @click.stop="nextImage" class="absolute right-2 md:right-8 top-1/2 -translate-y-1/2 text-white/40 hover:text-white text-5xl transition p-4 z-[101]">
+                <i class="fa-solid fa-chevron-right"></i>
+            </button>
+
+            <!-- 數量指示器 -->
+            <div v-if="viewingImages.length > 1" class="absolute bottom-6 left-1/2 -translate-x-1/2 bg-black/70 text-white px-5 py-2 rounded-full text-sm font-bold tracking-widest z-[101] border border-white/20 shadow-lg">
+                {{ viewingImageIndex + 1 }} / {{ viewingImages.length }}
+            </div>
+
+            <img :src="getDirectImageUrl(viewingImages[viewingImageIndex])" class="max-w-full max-h-full object-contain rounded-lg shadow-2xl transition-all duration-300 select-none" @click.stop>
         </div>
 
         <!-- 📝 內文詳細檢視彈窗 -->
@@ -202,7 +218,7 @@
                             
                             <div v-if="card.images && card.images.length > 0" 
                                  class="img-preview relative flex items-center justify-center cursor-pointer group/img clickable-area"
-                                 @click.stop="viewImage(getDirectImageUrl(card.images[card.coverIndex || 0]))">
+                                 @click.stop="openImageViewer(card.images, card.coverIndex || 0)">
                                 <img :src="getDirectImageUrl(card.images[card.coverIndex || 0])" class="max-w-full max-h-full object-contain pointer-events-none" @error="handleImageError">
                                 <div class="absolute inset-0 bg-black/30 opacity-0 group-hover/img:opacity-100 flex items-center justify-center transition">
                                     <i class="fa-solid fa-magnifying-glass-plus text-white text-3xl drop-shadow-lg"></i>
@@ -213,7 +229,7 @@
                             </div>
                             <div v-else-if="card.image && card.showImage" 
                                  class="img-preview relative flex items-center justify-center cursor-pointer group/img clickable-area"
-                                 @click.stop="viewImage(getDirectImageUrl(card.image))">
+                                 @click.stop="openImageViewer([card.image], 0)">
                                 <img :src="getDirectImageUrl(card.image)" class="max-w-full max-h-full object-contain pointer-events-none" @error="handleImageError">
                                 <div class="absolute inset-0 bg-black/30 opacity-0 group-hover/img:opacity-100 flex items-center justify-center transition">
                                     <i class="fa-solid fa-magnifying-glass-plus text-white text-3xl drop-shadow-lg"></i>
@@ -396,7 +412,7 @@
 
         createApp({
             setup() {
-                const appVersion = ref('V1.14.0');
+                const appVersion = ref('V1.15.0');
                 const isLoggedIn = ref(false);
                 const loginPassword = ref('');
                 
@@ -417,8 +433,40 @@
                 const IDLE_TIMEOUT = 15 * 60 * 1000; // 15 分鐘
                 // -----------------------
 
-                const viewingImage = ref(null);
-                const viewImage = (url) => { viewingImage.value = url; };
+                // --- 圖片輪播相關變數 ---
+                const viewingImages = ref([]);
+                const viewingImageIndex = ref(0);
+                
+                const openImageViewer = (images, startIndex = 0) => {
+                    if (!images) return;
+                    if (Array.isArray(images)) {
+                        viewingImages.value = images;
+                    } else {
+                        viewingImages.value = [images]; 
+                    }
+                    viewingImageIndex.value = startIndex;
+                };
+                
+                const closeImageViewer = () => {
+                    viewingImages.value = [];
+                    viewingImageIndex.value = 0;
+                };
+                
+                const nextImage = (e) => {
+                    if (e) e.stopPropagation();
+                    if (viewingImages.value.length > 1) {
+                        viewingImageIndex.value = (viewingImageIndex.value + 1) % viewingImages.value.length;
+                    }
+                };
+                
+                const prevImage = (e) => {
+                    if (e) e.stopPropagation();
+                    if (viewingImages.value.length > 1) {
+                        viewingImageIndex.value = (viewingImageIndex.value - 1 + viewingImages.value.length) % viewingImages.value.length;
+                    }
+                };
+                // -----------------------
+
                 const viewingDescCard = ref(null);
                 const viewDesc = (card) => { viewingDescCard.value = card; };
 
@@ -738,7 +786,6 @@
                     }
                 };
 
-                // --- 新增：匯出 Excel 功能 ---
                 const exportToExcel = () => {
                     if (!currentTrip.value || !currentTrip.value.days) return;
                     
@@ -747,12 +794,10 @@
                     currentTrip.value.days.forEach((day) => {
                         if (day.cards && day.cards.length > 0) {
                             day.cards.forEach((card, cIdx) => {
-                                // 整理檢查清單為純文字
                                 let checklistText = (card.checklist || [])
                                     .map(item => `${item.done ? '☑' : '☐'} ${item.text}`)
                                     .join('\n');
                                 
-                                // 整理標籤
                                 let tagsText = (card.tags || []).join(', ');
 
                                 exportData.push({
@@ -780,28 +825,24 @@
                         }
                     });
 
-                    // 建立工作表
                     const ws = XLSX.utils.json_to_sheet(exportData);
                     const wb = XLSX.utils.book_new();
                     XLSX.utils.book_append_sheet(wb, ws, "行程表");
 
-                    // 簡單設定欄寬
                     ws['!cols'] = [
-                        {wch: 15}, // 日期/天數
-                        {wch: 5},  // 順序
-                        {wch: 35}, // 行程標題
-                        {wch: 50}, // 詳細說明
-                        {wch: 15}, // 標籤
-                        {wch: 30}, // 檢查清單
-                        {wch: 35}, // 地圖連結
-                        {wch: 35}  // 參考網頁
+                        {wch: 15}, 
+                        {wch: 5},  
+                        {wch: 35}, 
+                        {wch: 50}, 
+                        {wch: 15}, 
+                        {wch: 30}, 
+                        {wch: 35}, 
+                        {wch: 35}  
                     ];
 
-                    // 匯出檔案
                     const fileName = `${currentTrip.value.name || '我的行程'}_行程表.xlsx`;
                     XLSX.writeFile(wb, fileName);
                 };
-                // ---------------------------
 
                 const openCardModal = (dayIdx) => {
                     isEditing.value = false;
@@ -865,7 +906,6 @@
                 };
 
                 onMounted(() => {
-                    // 自動同步，加入「非閒置中」才執行的判斷
                     setInterval(() => {
                         if (isLoggedIn.value && !showModal.value && !isIdle.value) fetchFromCloud(); 
                     }, 40000);
@@ -883,7 +923,6 @@
                         }
                     });
 
-                    // 綁定各類事件，只要使用者有操作就重置閒置計時器
                     ['mousemove', 'keydown', 'click', 'scroll', 'touchstart'].forEach(evt => {
                         window.addEventListener(evt, resetIdleTimer);
                     });
@@ -898,7 +937,7 @@
                         if (e.key === 'Escape') {
                             clipboardCard.value = null;
                             clipboardDay.value = null;
-                            viewingImage.value = null;
+                            closeImageViewer(); // 關閉圖片輪播
                             viewingDescCard.value = null;
                             activeDayMoveIdx.value = null;
                             cardMoveModalPos.value = null;
@@ -907,6 +946,12 @@
                                 attemptCloseModal();
                             }
                         }
+                        
+                        // 支援鍵盤左右方向鍵切換圖片
+                        if (viewingImages.value.length > 1) {
+                            if (e.key === 'ArrowRight') nextImage();
+                            if (e.key === 'ArrowLeft') prevImage();
+                        }
                     });
                 });
 
@@ -914,12 +959,13 @@
                     appVersion, isLoggedIn, loginPassword, handleLogin,
                     trips, activeTripIndex, currentTrip, loading, loadingMsg, uploadingImage, showModal, isEditing, form, tempImageUrl, lastSyncTime, defaultTags, currentTimestamp,
                     isIdle, resumeSync,
-                    exportToExcel, // 導出匯出功能
+                    exportToExcel,
+                    viewingImages, viewingImageIndex, openImageViewer, closeImageViewer, nextImage, prevImage, // 輸出輪播功能給模板
                     linkify, getTagColor,
                     clipboardCard, copyCard, pasteCard, 
                     clipboardDay, copyDay, pasteDay, 
                     clearClipboard, attemptCloseModal, 
-                    viewingImage, viewImage, viewingDescCard, viewDesc,
+                    viewingDescCard, viewDesc,
                     editTripName, deleteTrip,
                     toggleDayMoveMenu, moveDayToPosition, activeDayMoveIdx,
                     cardMoveModalPos, openCardMoveModal, moveCardToPosition, 
