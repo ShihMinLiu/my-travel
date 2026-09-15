@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>我的旅遊行程規劃 V1.11.5</title>
+    <title>我的旅遊行程規劃 V1.13.0</title>
     <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
@@ -22,9 +22,8 @@
     <!--
     @Author:      cathy_liu 劉詩敏
     @Date:        2026-09-15
-    @Description: 旅遊行程管理工具 V1.11.5 (全新對接版)
-                  1. 更新為全新的 Apps Script 部署網址，徹底解決舊版快取導致的密碼錯誤問題。
-    @Version:     V1.11.5
+    @Description: 旅遊行程管理工具 V1.13.0 (隱藏時間戳保護版 + 15分鐘閒置暫停同步機制)
+    @Version:     V1.13.0
     -->
 
     <div id="app" class="h-screen flex flex-col" @click="clearClipboard" v-cloak>
@@ -74,6 +73,18 @@
                         </button>
                     </div>
                 </div>
+            </div>
+        </div>
+
+        <!-- 😴 閒置超時畫面 (防回朔踢出機制) -->
+        <div v-if="isIdle && isLoggedIn" class="fixed inset-0 z-[200] flex items-center justify-center bg-slate-900/80 p-4 backdrop-blur-sm">
+            <div class="bg-white rounded-3xl p-8 text-center max-w-sm w-full animate-in zoom-in duration-300">
+                <i class="fa-solid fa-clock text-5xl text-slate-300 mb-4"></i>
+                <h2 class="text-xl font-black text-slate-800 mb-2">系統已暫停連線</h2>
+                <p class="text-sm text-slate-500 mb-6">為防止多人編輯資料衝突，閒置超過 15 分鐘已自動中斷同步。請點擊下方按鈕載入最新資料並恢復連線。</p>
+                <button @click="resumeSync" class="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl shadow-lg transition-all active:scale-95">
+                    重新連線並同步
+                </button>
             </div>
         </div>
 
@@ -165,7 +176,7 @@
                             </div>
                         </div>
                         
-                        <input v-model="day.date" @blur="saveToCloud" @click.stop class="bg-transparent font-black text-slate-700 w-full focus:outline-none text-lg px-1">
+                        <input v-model="day.date" @blur="saveToCloud()" @click.stop class="bg-transparent font-black text-slate-700 w-full focus:outline-none text-lg px-1">
                         
                         <div class="flex gap-2 items-center ml-2 clickable-area">
                             <button @click.stop="copyDay(day)" class="text-slate-400 hover:text-emerald-500 transition" title="複製此欄 (可跨看板貼上)"><i class="fa-regular fa-copy text-sm"></i></button>
@@ -233,7 +244,7 @@
 
                                 <div v-if="card.checklist && card.checklist.length" class="mb-3 space-y-1 bg-slate-50 p-2 rounded-xl border border-slate-100 clickable-area">
                                     <div v-for="(item, iIdx) in card.checklist" :key="iIdx" class="flex items-center gap-2 text-[10px]">
-                                        <input type="checkbox" v-model="item.done" @change="saveToCloud" @click.stop class="rounded h-3 w-3 text-blue-600 border-slate-300">
+                                        <input type="checkbox" v-model="item.done" @change="saveToCloud()" @click.stop class="rounded h-3 w-3 text-blue-600 border-slate-300">
                                         <span :class="{'line-through text-slate-400': item.done}" class="text-slate-600 truncate">{{ item.text }}</span>
                                     </div>
                                 </div>
@@ -377,11 +388,13 @@
 
         createApp({
             setup() {
-                const appVersion = ref('V1.11.5');
+                const appVersion = ref('V1.13.0');
                 const isLoggedIn = ref(false);
                 const loginPassword = ref('');
                 
                 const trips = ref([{ name: '新增旅程', days: [{ date: 'Day 1', cards: [] }] }]);
+                const currentTimestamp = ref(0); 
+                
                 const activeTripIndex = ref(0);
                 const loading = ref(false);
                 const uploadingImage = ref(false);
@@ -390,6 +403,12 @@
                 const isEditing = ref(false);
                 const lastSyncTime = ref('--:--');
                 
+                // --- 閒置機制相關變數 ---
+                const isIdle = ref(false);
+                let idleTimer = null;
+                const IDLE_TIMEOUT = 15 * 60 * 1000; // 15 分鐘
+                // -----------------------
+
                 const viewingImage = ref(null);
                 const viewImage = (url) => { viewingImage.value = url; };
                 const viewingDescCard = ref(null);
@@ -438,6 +457,22 @@
                         });
                     });
                     defaultTags.value = Array.from(usedTags);
+                };
+
+                // 重置閒置計時器
+                const resetIdleTimer = () => {
+                    if (isIdle.value || !isLoggedIn.value) return; 
+                    clearTimeout(idleTimer);
+                    idleTimer = setTimeout(() => {
+                        isIdle.value = true;
+                    }, IDLE_TIMEOUT);
+                };
+
+                // 恢復同步連線
+                const resumeSync = () => {
+                    isIdle.value = false;
+                    resetIdleTimer();
+                    fetchFromCloud(); 
                 };
 
                 const copyCard = (cardData) => {
@@ -536,10 +571,15 @@
                         if (data.error) { alert('密碼錯誤！'); loginPassword.value = ''; } 
                         else { 
                             isLoggedIn.value = true; 
-                            if (Array.isArray(data) && data.length > 0) {
-                                trips.value = data;
+                            if (data.trips && Array.isArray(data.trips)) {
+                                trips.value = data.trips;
+                                currentTimestamp.value = data.timestamp || 0;
+                                extractTags();
+                            } else if (Array.isArray(data)) {
+                                trips.value = data; 
                                 extractTags();
                             }
+                            resetIdleTimer(); // 登入成功後啟動計時
                         }
                     } catch (e) { alert('連線失敗'); } finally { loading.value = false; }
                 };
@@ -643,27 +683,51 @@
                     try {
                         const res = await fetch(`${CLOUD_API_URL}?pwd=${loginPassword.value}`);
                         const data = await res.json();
-                        if (!data.error && Array.isArray(data)) {
-                            trips.value = data;
+                        if (data.trips && Array.isArray(data.trips)) {
+                            trips.value = data.trips;
+                            currentTimestamp.value = data.timestamp || 0;
                             extractTags(); 
+                        } else if (!data.error && Array.isArray(data)) { 
+                            trips.value = data;
+                            extractTags();
                         }
                         lastSyncTime.value = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
                     } catch (e) { console.error(e); } finally { loading.value = false; }
                 };
 
-                const saveToCloud = async () => {
+                const saveToCloud = async (force = false) => {
                     loading.value = true;
                     loadingMsg.value = '切塊存檔中...';
                     try {
-                        await fetch(`${CLOUD_API_URL}?pwd=${loginPassword.value}`, { 
-                            method: "POST", mode: "no-cors", headers: {"Content-Type": "text/plain"},
+                        let url = `${CLOUD_API_URL}?pwd=${loginPassword.value}&ts=${currentTimestamp.value}`;
+                        if (force) url += `&force=true`;
+                        
+                        const res = await fetch(url, { 
+                            method: "POST", 
+                            headers: {"Content-Type": "text/plain"},
                             body: JSON.stringify(trips.value) 
                         });
+                        
+                        const responseText = await res.text();
+                        
+                        if (responseText.startsWith("Error: Conflict")) {
+                            loading.value = false;
+                            if (confirm("⚠️ 警告：雲端資料已被其他人修改！\n\n如果你強制存檔，將會覆蓋掉別人的資料（發生回朔）。\n\n點「確定」重新載入最新資料 (你目前未存檔的變更會遺失)。\n點「取消」保留目前畫面，讓你手動備份。")) {
+                                await fetchFromCloud();
+                            }
+                            return;
+                        } else if (responseText.startsWith("Success:")) {
+                            currentTimestamp.value = parseInt(responseText.split(":")[1], 10) || currentTimestamp.value;
+                        }
+                        
                         setTimeout(() => { 
                             loading.value = false; 
                             lastSyncTime.value = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); 
                         }, 1000);
-                    } catch (e) { loading.value = false; }
+                    } catch (e) { 
+                        console.error(e);
+                        loading.value = false; 
+                    }
                 };
 
                 const openCardModal = (dayIdx) => {
@@ -728,12 +792,13 @@
                 };
 
                 onMounted(() => {
+                    // 自動同步，加入「非閒置中」才執行的判斷
                     setInterval(() => {
-                        if (isLoggedIn.value && !showModal.value) fetchFromCloud(); 
+                        if (isLoggedIn.value && !showModal.value && !isIdle.value) fetchFromCloud(); 
                     }, 40000);
 
                     const aggressiveSync = () => {
-                        if (isLoggedIn.value && !showModal.value && !isEditing.value) {
+                        if (isLoggedIn.value && !showModal.value && !isEditing.value && !isIdle.value) {
                             fetchFromCloud();
                         }
                     };
@@ -743,6 +808,11 @@
                         if (document.visibilityState === 'visible') {
                             aggressiveSync();
                         }
+                    });
+
+                    // 綁定各類事件，只要使用者有操作就重置閒置計時器
+                    ['mousemove', 'keydown', 'click', 'scroll', 'touchstart'].forEach(evt => {
+                        window.addEventListener(evt, resetIdleTimer);
                     });
 
                     window.addEventListener('click', () => {
@@ -769,7 +839,8 @@
 
                 return {
                     appVersion, isLoggedIn, loginPassword, handleLogin,
-                    trips, activeTripIndex, currentTrip, loading, loadingMsg, uploadingImage, showModal, isEditing, form, tempImageUrl, lastSyncTime, defaultTags,
+                    trips, activeTripIndex, currentTrip, loading, loadingMsg, uploadingImage, showModal, isEditing, form, tempImageUrl, lastSyncTime, defaultTags, currentTimestamp,
+                    isIdle, resumeSync, // 開放變數與函式給模板使用
                     linkify, getTagColor,
                     clipboardCard, copyCard, pasteCard, 
                     clipboardDay, copyDay, pasteDay, 
@@ -787,3 +858,4 @@
     </script>
 </body>
 </html>
+<!-- complete -->
