@@ -3,9 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>我的旅遊行程規劃 V1.13.0</title>
+    <title>我的旅遊行程規劃 V1.14.0</title>
     <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
+    <!-- 引入 SheetJS 用於匯出 Excel -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
         [v-cloak] { display: none; }
@@ -22,8 +24,8 @@
     <!--
     @Author:      cathy_liu 劉詩敏
     @Date:        2026-09-15
-    @Description: 旅遊行程管理工具 V1.13.0 (隱藏時間戳保護版 + 15分鐘閒置暫停同步機制)
-    @Version:     V1.13.0
+    @Description: 旅遊行程管理工具 V1.14.0 (新增一鍵匯出 Excel 功能)
+    @Version:     V1.14.0
     -->
 
     <div id="app" class="h-screen flex flex-col" @click="clearClipboard" v-cloak>
@@ -121,7 +123,13 @@
                     </div>
                     <div class="flex items-center gap-2">
                         <div v-if="loading" class="text-[10px] bg-white/20 px-2 py-1 rounded-full animate-pulse">{{ loadingMsg }}</div>
-                        <button @click.stop="fetchFromCloud" class="p-2 hover:bg-white/10 rounded-full transition"><i class="fa-solid fa-sync"></i></button>
+                        <button @click.stop="fetchFromCloud" class="p-2 hover:bg-white/10 rounded-full transition" title="強制同步"><i class="fa-solid fa-sync"></i></button>
+                        
+                        <!-- 匯出 Excel 按鈕 -->
+                        <button @click.stop="exportToExcel" class="bg-emerald-600 hover:bg-emerald-500 text-white font-bold px-3 py-1 rounded-lg text-sm shadow transition flex items-center gap-1">
+                            <i class="fa-solid fa-file-excel"></i> <span class="hidden sm:inline">匯出 Excel</span>
+                        </button>
+                        
                         <button @click.stop="createNewTrip" class="bg-blue-500 hover:bg-blue-400 text-white font-bold px-3 py-1 rounded-lg text-sm shadow transition">+ 新行程</button>
                     </div>
                 </div>
@@ -388,7 +396,7 @@
 
         createApp({
             setup() {
-                const appVersion = ref('V1.13.0');
+                const appVersion = ref('V1.14.0');
                 const isLoggedIn = ref(false);
                 const loginPassword = ref('');
                 
@@ -730,6 +738,71 @@
                     }
                 };
 
+                // --- 新增：匯出 Excel 功能 ---
+                const exportToExcel = () => {
+                    if (!currentTrip.value || !currentTrip.value.days) return;
+                    
+                    let exportData = [];
+
+                    currentTrip.value.days.forEach((day) => {
+                        if (day.cards && day.cards.length > 0) {
+                            day.cards.forEach((card, cIdx) => {
+                                // 整理檢查清單為純文字
+                                let checklistText = (card.checklist || [])
+                                    .map(item => `${item.done ? '☑' : '☐'} ${item.text}`)
+                                    .join('\n');
+                                
+                                // 整理標籤
+                                let tagsText = (card.tags || []).join(', ');
+
+                                exportData.push({
+                                    '日期/天數': day.date,
+                                    '順序': cIdx + 1,
+                                    '行程標題': card.title,
+                                    '詳細說明': card.desc || '',
+                                    '標籤': tagsText,
+                                    '檢查清單': checklistText,
+                                    '地圖連結': card.mapLink || '',
+                                    '參考網頁': card.url || ''
+                                });
+                            });
+                        } else {
+                            exportData.push({
+                                '日期/天數': day.date,
+                                '順序': '',
+                                '行程標題': '(無行程)',
+                                '詳細說明': '',
+                                '標籤': '',
+                                '檢查清單': '',
+                                '地圖連結': '',
+                                '參考網頁': ''
+                            });
+                        }
+                    });
+
+                    // 建立工作表
+                    const ws = XLSX.utils.json_to_sheet(exportData);
+                    const wb = XLSX.utils.book_new();
+                    XLSX.utils.book_append_sheet(wb, ws, "行程表");
+
+                    // 簡單設定欄寬
+                    ws['!cols'] = [
+                        {wch: 15}, // 日期/天數
+                        {wch: 5},  // 順序
+                        {wch: 35}, // 行程標題
+                        {wch: 50}, // 詳細說明
+                        {wch: 15}, // 標籤
+                        {wch: 30}, // 檢查清單
+                        {wch: 35}, // 地圖連結
+                        {wch: 35}  // 參考網頁
+                    ];
+
+                    // 匯出檔案
+                    const fileName = `${currentTrip.value.name || '我的行程'}_行程表.xlsx`;
+                    XLSX.writeFile(wb, fileName);
+                };
+                // ---------------------------
+
                 const openCardModal = (dayIdx) => {
                     isEditing.value = false;
                     editingPos.value.day = dayIdx;
@@ -840,7 +913,8 @@
                 return {
                     appVersion, isLoggedIn, loginPassword, handleLogin,
                     trips, activeTripIndex, currentTrip, loading, loadingMsg, uploadingImage, showModal, isEditing, form, tempImageUrl, lastSyncTime, defaultTags, currentTimestamp,
-                    isIdle, resumeSync, // 開放變數與函式給模板使用
+                    isIdle, resumeSync,
+                    exportToExcel, // 導出匯出功能
                     linkify, getTagColor,
                     clipboardCard, copyCard, pasteCard, 
                     clipboardDay, copyDay, pasteDay, 
